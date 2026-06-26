@@ -1,6 +1,6 @@
 # pCloud NAS Sync
 
-pCloud NAS Sync 是一个飞牛 fnOS Docker 应用，用于从 NAS 本地目录单向同步文件到 pCloud。
+fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. It supports multiple one-way upload tasks, local and remote folder pickers, pCloud API based remote scanning, retry handling, detailed sync logs, and upload progress. The project is designed for personal self-hosted NAS backup and does not include any bundled pCloud credentials, user IDs, secrets, or tokens.
 
 ## 功能
 
