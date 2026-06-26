@@ -96,14 +96,15 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.0 is one-way upload only, not two-way sync.
-- v0.2.0 does not propagate local deletions to pCloud.
+- v0.2.1 is one-way upload only, not two-way sync.
+- v0.2.1 does not propagate local deletions to pCloud.
 - File changes are discovered by periodic scans. The default interval is 300 seconds, and users can trigger a manual scan in the UI.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
-- v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`. Sync logs now show file-level upload rows, task cards are compact, saved access tokens display a masked value, and deleting all tasks also clears migrated legacy `sources`.
+- v0.2.1: Bumps the package version for fnOS installation and upgrade detection. Sync logs now show file-level upload rows, task cards are compact, saved access tokens display a masked value, and deleting all tasks also clears migrated legacy `sources`.
+- v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`.
 - v0.1.9: Converts sync logs into a table view with task, status, and filename filters. Successful uploads now create per-file log entries. Retrying failed or stale files immediately drains the pending queue.
 - v0.1.8: Fixes files stuck in `uploading` when the failed count is zero. Status API and UI now show the running version and uploading-file details.
 - v0.1.7: Adds rsync-like remote comparison. The app scans the pCloud destination, skips unchanged remote files, uploads missing or changed files, and cleans old `--` state.
