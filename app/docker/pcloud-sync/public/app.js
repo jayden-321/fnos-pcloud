@@ -17,7 +17,6 @@ const fields = {
   clientSecret: form.elements.clientSecret,
   oauthCode: form.elements.oauthCode,
   accessToken: form.elements.accessToken,
-  intervalSeconds: form.elements.intervalSeconds,
   concurrency: form.elements.concurrency,
   logRetentionDays: form.elements.logRetentionDays,
   logRetentionCount: form.elements.logRetentionCount,
@@ -163,7 +162,6 @@ async function loadConfig() {
   fields.clientId.value = currentConfig.pcloud.clientId || '';
   fields.clientSecret.value = '';
   fields.accessToken.value = currentConfig.pcloud.accessToken ? TOKEN_MASK : '';
-  fields.intervalSeconds.value = currentConfig.sync.intervalSeconds;
   fields.concurrency.value = currentConfig.sync.concurrency;
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
   fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
@@ -189,7 +187,6 @@ async function saveConfig() {
     pcloud,
     tasks,
     sync: {
-      intervalSeconds: Number(fields.intervalSeconds.value),
       concurrency: Number(fields.concurrency.value),
       logRetentionDays: Number(fields.logRetentionDays.value),
       logRetentionCount: Number(fields.logRetentionCount.value),
@@ -344,15 +341,15 @@ function addTaskEditor(task = {}) {
           <option value="manual" ${schedule.type === 'manual' ? 'selected' : ''}>手动</option>
         </select>
       </label>
-      <label>
+      <label data-schedule-field="interval">
         间隔秒
         <input name="scheduleIntervalSeconds" type="number" min="30" step="30" value="${escapeHtml(String(schedule.intervalSeconds || currentConfig?.sync?.intervalSeconds || 300))}">
       </label>
-      <label>
+      <label data-schedule-field="time">
         时间
         <input name="scheduleTime" type="time" value="${escapeHtml(schedule.time || '00:00')}">
       </label>
-      <label class="weekday-row">
+      <label class="weekday-row" data-schedule-field="weekly">
         每周
         <span class="weekday-options">
           ${weekdayInputs(weekdays)}
@@ -362,6 +359,8 @@ function addTaskEditor(task = {}) {
     <input name="id" type="hidden" value="${escapeHtml(task.id || '')}">
   `;
   taskEditors.append(editor);
+  editor.querySelector('[name="scheduleType"]').addEventListener('change', () => updateScheduleVisibility(editor));
+  updateScheduleVisibility(editor);
 }
 
 function collectTaskEditors() {
@@ -441,6 +440,16 @@ function collectSchedule(editor) {
     type: 'interval',
     intervalSeconds: Number(editor.querySelector('[name="scheduleIntervalSeconds"]').value || currentConfig?.sync?.intervalSeconds || 300)
   };
+}
+
+function updateScheduleVisibility(editor) {
+  const type = editor.querySelector('[name="scheduleType"]').value;
+  for (const field of editor.querySelectorAll('[data-schedule-field]')) {
+    const fieldName = field.dataset.scheduleField;
+    field.hidden = fieldName === 'interval' ? type !== 'interval'
+      : fieldName === 'time' ? !['daily', 'weekly'].includes(type)
+        : type !== 'weekly';
+  }
 }
 
 function weekdayInputs(selected) {
@@ -527,14 +536,10 @@ function renderEvents() {
       <td>${escapeHtml(row.sizeText)}</td>
       <td>${escapeHtml(row.task)}</td>
       <td>${escapeHtml(row.time)}</td>
-      <td><span class="log-status ${escapeHtml(row.status)}">${escapeHtml(row.statusText)}</span></td>
+      <td title="${escapeHtml(row.detail)}"><span class="log-status ${escapeHtml(row.status)}">${escapeHtml(row.statusText)}</span></td>
       <td>${escapeHtml(row.progressText)}</td>
-      <td title="${escapeHtml(row.detail)}">
-        <span>${escapeHtml(row.eventText)}</span>
-        ${row.detail ? `<small>${escapeHtml(row.detail)}</small>` : ''}
-      </td>
     </tr>
-  `).join('') || '<tr><td colspan="7" class="empty">暂无文件同步日志</td></tr>';
+  `).join('') || '<tr><td colspan="6" class="empty">暂无文件同步日志</td></tr>';
 }
 
 function formatBytesPerSecond(bytes) {

@@ -40,8 +40,11 @@ test('sync logs expose file size, progress, and uploading status filters', async
 
   assert.match(html, /<th>大小<\/th>/);
   assert.match(html, /<th>进度<\/th>/);
+  assert.doesNotMatch(html, /<th>事件<\/th>/);
   assert.match(html, /<option value="uploading">上传中<\/option>/);
   assert.match(script, /uploadToLogRow/);
+  assert.match(script, /colspan="6"/);
+  assert.doesNotMatch(script, /row\.eventText/);
 });
 
 test('task metrics include a separate existing-file count', async () => {
@@ -71,6 +74,24 @@ test('web UI exposes current-task metrics and task schedule controls', async () 
   assert.match(script, /scheduleWeekdays/);
   assert.match(script, /每天/);
   assert.match(script, /每周/);
+});
+
+test('task schedule form hides fields that do not apply to the selected schedule type', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.doesNotMatch(html, /name="intervalSeconds"/);
+  assert.doesNotMatch(html, /扫描间隔秒/);
+  assert.doesNotMatch(script, /fields\.intervalSeconds/);
+  assert.match(script, /data-schedule-field="interval"/);
+  assert.match(script, /data-schedule-field="time"/);
+  assert.match(script, /data-schedule-field="weekly"/);
+  assert.match(script, /updateScheduleVisibility/);
+  assert.match(script, /field\.hidden = fieldName === 'interval' \? type !== 'interval'/);
+  assert.match(script, /fieldName === 'time' \? !\['daily', 'weekly'\]\.includes\(type\)/);
+  assert.match(script, /type !== 'weekly'/);
 });
 
 test('web UI exposes stop sync and opens pCloud picker from the selected folder or root', async () => {
