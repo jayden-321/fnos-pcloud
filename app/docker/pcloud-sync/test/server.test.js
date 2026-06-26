@@ -70,6 +70,37 @@ test('HTTP API drains the pending queue after retrying failed or stuck files', a
   assert.deepEqual(body, { queued: 1, uploaded: 1, failed: 0 });
 });
 
+test('HTTP API keeps saved token masks and allows deleting all tasks', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  await store.saveConfig({
+    port: 8080,
+    pcloud: { accessToken: 'old-token', hostname: 'api.pcloud.com', remoteRoot: '/NAS' },
+    sync: { intervalSeconds: 300, concurrency: 2, ignorePatterns: [] },
+    tasks: [{ id: 'docs', name: 'docs', localPath: '/vol1/docs', remotePath: '/NAS/docs', enabled: true }],
+    sources: [{ id: 'docs', path: '/vol1/docs', enabled: true, remoteName: 'docs' }]
+  });
+
+  const app = createApp({ store, engine: {} });
+  const response = await app.fetch(new Request('http://local/api/config', {
+    method: 'POST',
+    body: JSON.stringify({
+      pcloud: { hostname: 'api.pcloud.com', remoteRoot: '/NAS', accessToken: '******' },
+      tasks: []
+    })
+  }));
+  const body = await response.json();
+  const saved = await store.loadConfig();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.pcloud.accessToken, '***');
+  assert.deepEqual(body.tasks, []);
+  assert.deepEqual(saved.tasks, []);
+  assert.deepEqual(saved.sources, []);
+  assert.equal(saved.pcloud.accessToken, 'old-token');
+});
+
 test('HTTP API lists local folders inside allowed roots only', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
   const root = await mkdtemp(path.join(tmpdir(), 'pcloud-local-root-'));

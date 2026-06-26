@@ -191,17 +191,18 @@ async function serveStatic(urlPath) {
 function mergeConfig(previous, patch) {
   const pcloudPatch = { ...(patch.pcloud ?? {}) };
   for (const key of ['clientSecret', 'accessToken']) {
-    if (pcloudPatch[key] === '***' || pcloudPatch[key] === '') {
+    if (['***', '******', ''].includes(pcloudPatch[key])) {
       delete pcloudPatch[key];
     }
   }
+  const hasTasksPatch = Object.hasOwn(patch, 'tasks');
   return {
     ...previous,
     ...patch,
     pcloud: { ...(previous.pcloud ?? {}), ...pcloudPatch },
     sync: { ...(previous.sync ?? {}), ...(patch.sync ?? {}) },
-    tasks: patch.tasks ?? previous.tasks ?? [],
-    sources: patch.sources ?? previous.sources ?? []
+    tasks: hasTasksPatch ? patch.tasks : previous.tasks ?? [],
+    sources: Object.hasOwn(patch, 'sources') ? patch.sources : hasTasksPatch ? [] : previous.sources ?? []
   };
 }
 

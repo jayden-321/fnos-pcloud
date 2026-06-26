@@ -11,7 +11,7 @@
       <div class="window-dots" aria-hidden="true">
         <span></span><span></span><span></span>
       </div>
-      <h1>飞牛同步</h1>
+      <h1>pCloud Sync</h1>
       <nav>
         <button class="nav-item active" data-tab="tasks" type="button">同步任务</button>
         <button class="nav-item" data-tab="logs" type="button">同步日志</button>
@@ -70,7 +70,6 @@
             <select id="eventStatusFilter" aria-label="状态筛选">
               <option value="">全部状态</option>
               <option value="success">成功</option>
-              <option value="queued">待处理</option>
               <option value="failed">失败</option>
             </select>
             <input id="eventSearch" autocomplete="off" placeholder="搜索文件名称">
@@ -149,7 +148,7 @@
 
           <section class="panel task-editor-panel">
             <div class="panel-title">
-              <h3>同步任务</h3>
+              <h3>任务配置</h3>
               <button id="addTask" type="button">新增任务</button>
             </div>
             <div id="taskEditors" class="task-editors"></div>

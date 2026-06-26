@@ -1,3 +1,6 @@
+import { eventToLogRow, fileLogEvents } from './logRows.js';
+
+const TOKEN_MASK = '******';
 const form = document.querySelector('#settingsForm');
 const toast = document.querySelector('#toast');
 const taskEditors = document.querySelector('#taskEditors');
@@ -144,7 +147,7 @@ async function loadConfig() {
   fields.hostname.value = currentConfig.pcloud.hostname;
   fields.clientId.value = currentConfig.pcloud.clientId || '';
   fields.clientSecret.value = '';
-  fields.accessToken.value = '';
+  fields.accessToken.value = currentConfig.pcloud.accessToken ? TOKEN_MASK : '';
   fields.remoteRoot.value = currentConfig.pcloud.remoteRoot;
   fields.intervalSeconds.value = currentConfig.sync.intervalSeconds;
   fields.concurrency.value = currentConfig.sync.concurrency;
@@ -161,8 +164,9 @@ async function saveConfig() {
   if (fields.clientSecret.value.trim()) {
     pcloud.clientSecret = fields.clientSecret.value.trim();
   }
-  if (fields.accessToken.value.trim()) {
-    pcloud.accessToken = fields.accessToken.value.trim();
+  const accessToken = fields.accessToken.value.trim();
+  if (accessToken && !['***', TOKEN_MASK].includes(accessToken)) {
+    pcloud.accessToken = accessToken;
   }
 
   const tasks = collectTaskEditors();
@@ -198,7 +202,7 @@ async function refreshStatus() {
     </tr>
   `).join('') || '<tr><td colspan="3">暂无失败、待上传或上传中文件</td></tr>';
 
-  updateTaskOptions(currentEvents);
+  updateTaskOptions(fileLogEvents(currentEvents));
   renderEvents();
   renderTaskCards();
 }
@@ -222,21 +226,15 @@ function renderTaskCards() {
     return `
       <article class="task-card">
         <div class="task-card-main">
-          <div class="folder-icon">📁</div>
-          <div>
+          <div class="task-card-copy">
             <h3>${escapeHtml(task.name)}</h3>
             <p class="${counts.failed > 0 ? 'danger' : 'success'}">${escapeHtml(status)}</p>
           </div>
+          <div class="task-card-actions">
+            <button type="button" data-tab="logs">查看日志</button>
+            <button type="button" data-tab="settings">编辑</button>
+          </div>
         </div>
-        <div class="task-card-actions">
-          <button type="button" data-tab="logs">查看日志</button>
-          <button type="button" data-tab="settings">编辑</button>
-        </div>
-        <dl>
-          <div><dt>本地路径</dt><dd>${escapeHtml(task.localPath)}</dd></div>
-          <div><dt>pCloud 路径</dt><dd>${escapeHtml(task.remotePath)}</dd></div>
-          <div><dt>同步规则</dt><dd>单向上传</dd></div>
-        </dl>
       </article>
     `;
   }).join('') || `
@@ -360,7 +358,7 @@ function renderEvents() {
   const taskFilter = eventFilters.task.value;
   const statusFilter = eventFilters.status.value;
   const search = eventFilters.search.value.trim().toLowerCase();
-  const rows = currentEvents
+  const rows = fileLogEvents(currentEvents)
     .map(eventToLogRow)
     .filter((row) => !taskFilter || row.task === taskFilter)
     .filter((row) => !statusFilter || row.status === statusFilter)
@@ -378,62 +376,7 @@ function renderEvents() {
         ${row.detail ? `<small>${escapeHtml(row.detail)}</small>` : ''}
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="5" class="empty">暂无同步日志</td></tr>';
-}
-
-function eventToLogRow(event) {
-  const meta = eventMeta(event.type);
-  const subject = event.subject || '';
-  const message = event.message || '';
-  const fileName = fileNameForEvent(event);
-  return {
-    fileName,
-    task: taskForEvent(subject, fileName),
-    time: formatDateTime(event.at),
-    status: meta.status,
-    statusText: meta.statusText,
-    eventText: meta.eventText,
-    detail: message
-  };
-}
-
-function eventMeta(type) {
-  const map = {
-    upload_succeeded: { status: 'success', statusText: '成功', eventText: '上传' },
-    upload_failed: { status: 'failed', statusText: '失败', eventText: '上传' },
-    retry_queued: { status: 'queued', statusText: '待处理', eventText: '重试' },
-    scan_completed: { status: 'success', statusText: '成功', eventText: '扫描' },
-    scan_failed: { status: 'failed', statusText: '失败', eventText: '扫描' },
-    remote_scan_failed: { status: 'failed', statusText: '失败', eventText: '远端扫描' }
-  };
-  return map[type] || { status: 'queued', statusText: '待处理', eventText: type || '事件' };
-}
-
-function fileNameForEvent(event) {
-  if (event.type === 'scan_completed') {
-    return '同步扫描';
-  }
-  if (event.type === 'retry_queued') {
-    return '失败队列';
-  }
-  return event.subject || '同步任务';
-}
-
-function taskForEvent(subject, fileName) {
-  if (subject === 'sync' || subject === 'failed files') {
-    return 'sync';
-  }
-  const first = String(fileName).split('/').filter(Boolean)[0];
-  return first || 'sync';
-}
-
-function formatDateTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  const pad = (number) => String(number).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  `).join('') || '<tr><td colspan="5" class="empty">暂无文件同步日志</td></tr>';
 }
 
 function formatBytesPerSecond(bytes) {

@@ -26,8 +26,11 @@ export function normalizeConfig(input = {}) {
   const pcloud = normalizePCloud(raw.pcloud ?? {});
   const sync = normalizeSync(raw.sync ?? {});
   const legacySources = normalizeSources(raw.sources ?? []);
-  const tasks = normalizeTasks(raw.tasks, legacySources, pcloud.remoteRoot);
-  const sources = legacySources.length > 0 ? legacySources : tasksToSources(tasks, pcloud.remoteRoot);
+  const hasExplicitTasks = Object.hasOwn(raw, 'tasks');
+  const tasks = normalizeTasks(hasExplicitTasks ? raw.tasks : undefined, hasExplicitTasks ? [] : legacySources, pcloud.remoteRoot);
+  const sources = hasExplicitTasks
+    ? tasksToSources(tasks, pcloud.remoteRoot)
+    : legacySources.length > 0 ? legacySources : tasksToSources(tasks, pcloud.remoteRoot);
   const port = clampInteger(raw.port, DEFAULT_CONFIG.port, 1, 65535);
 
   return { port, pcloud, sync, tasks, sources };

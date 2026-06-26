@@ -136,6 +136,17 @@ test('normalizeConfig accepts explicit multi-task definitions', () => {
   ]);
 });
 
+test('normalizeConfig treats an explicit empty task list as deleted tasks', () => {
+  const config = normalizeConfig({
+    pcloud: { remoteRoot: '/NAS' },
+    tasks: [],
+    sources: [{ id: 'docs', path: '/vol1/docs', enabled: true, remoteName: 'docs' }]
+  });
+
+  assert.deepEqual(config.tasks, []);
+  assert.deepEqual(config.sources, []);
+});
+
 test('redactConfig hides stored secrets but keeps connection shape', () => {
   const redacted = redactConfig(normalizeConfig({
     pcloud: {

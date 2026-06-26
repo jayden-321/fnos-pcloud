@@ -10,7 +10,7 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Local folder picker for NAS paths that are visible inside the container.
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, synced files, failed files, pending files, active uploads, and aggregate upload speed.
-- Filterable sync logs.
+- Filterable file-level sync logs.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
 
 ## pCloud Authorization
@@ -103,7 +103,7 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Changelog
 
-- v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`. Keeps filterable sync logs and automatically migrates legacy `sources` config into tasks.
+- v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`. Sync logs now show file-level upload rows, task cards are compact, saved access tokens display a masked value, and deleting all tasks also clears migrated legacy `sources`.
 - v0.1.9: Converts sync logs into a table view with task, status, and filename filters. Successful uploads now create per-file log entries. Retrying failed or stale files immediately drains the pending queue.
 - v0.1.8: Fixes files stuck in `uploading` when the failed count is zero. Status API and UI now show the running version and uploading-file details.
 - v0.1.7: Adds rsync-like remote comparison. The app scans the pCloud destination, skips unchanged remote files, uploads missing or changed files, and cleans old `--` state.
@@ -114,4 +114,3 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 - v0.1.2: Switches the default base image to a DaoCloud mirror for easier installation in China.
 - v0.1.1: Fixes fnOS installation failures caused by Docker Hub proxy 401 errors when pulling `node:22-alpine`.
 - v0.1.0: Initial one-way sync release with pCloud authorization, folder config, status metrics, and failed-file retry.
-

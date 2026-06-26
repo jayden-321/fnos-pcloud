@@ -197,6 +197,7 @@ dt {
 .task-card-main {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 14px;
   padding: 22px 28px;
 }
@@ -205,14 +206,8 @@ dt {
   font-size: 20px;
 }
 
-.folder-icon {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 8px;
-  background: #e8f1ff;
-  font-size: 26px;
+.task-card-copy {
+  min-width: 0;
 }
 
 .task-card-actions {
@@ -232,20 +227,6 @@ dt {
 .task-editor button:hover,
 .folder-dialog button:hover {
   background: #ddeafa;
-}
-
-.task-card dl {
-  display: grid;
-  grid-template-columns: 1.2fr 1.2fr 0.8fr;
-  gap: 16px;
-  padding: 18px 28px;
-  border-top: 1px solid var(--line);
-}
-
-.task-card dd {
-  margin-top: 6px;
-  color: #778ba8;
-  overflow-wrap: anywhere;
 }
 
 .success {
@@ -580,8 +561,9 @@ dialog::backdrop {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .task-card dl {
-    grid-template-columns: 1fr;
+  .task-card-main {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .log-toolbar {
