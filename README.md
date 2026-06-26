@@ -119,14 +119,15 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.11 is one-way upload only, not two-way sync.
-- v0.2.11 does not propagate local deletions to pCloud.
+- v0.2.12 is one-way upload only, not two-way sync.
+- v0.2.12 does not propagate local deletions to pCloud.
 - First scans and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use cached file state when the task path has not changed.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.2.12: Optimizes repeated cached scans for large folders. Cached scans now batch file-state replacement per task instead of rewriting `state.json` once per unchanged file, so large repeated scans avoid both recursive pCloud listing and thousands of full JSON writes.
 - v0.2.11: Refines sync task card states and repeated scan caching. New tasks now show Not Scanned instead of Completed, full reconciliation shows Scanning, upload/queue work shows Syncing, and Completed is only shown after the task has file state with no pending work. Repeated scans now reuse cached synced/existing file state when the task path has not changed, avoiding another recursive pCloud listing after a successful sync.
 - v0.2.10: Fixes task schedule field visibility in Settings. The UI now enforces the HTML `hidden` attribute in CSS so interval, daily, weekly, and manual schedules actually hide fields that do not apply. Manual scans with no enabled tasks now show a no-task message instead of saying the scan was triggered.
 - v0.2.9: Simplifies Settings and Sync Logs. The global scan interval field is removed from Sync Rules, each task schedule only shows fields that apply to the selected mode, and the separate Event column is removed from Sync Logs.

@@ -354,8 +354,9 @@ export class SyncEngine {
           existing: existingCount
         });
 
+        const plannedFiles = [];
         for (const file of plan.pending) {
-          await this.store.upsertFile({
+          plannedFiles.push({
             ...file,
             status: 'pending',
             error: '',
@@ -365,8 +366,9 @@ export class SyncEngine {
 
         for (const file of plan.unchanged) {
           const existing = known.get(file.key) ?? {};
-          await this.store.upsertFile(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles)));
+          plannedFiles.push(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles)));
         }
+        await this.store.replaceFilesForSources([source.id], plannedFiles);
 
         if (config.pcloud.accessToken && !this.stopRequested) {
           Object.assign(taskResult, {

@@ -78,6 +78,24 @@ test('JsonStore stats can be scoped to one task', async () => {
   });
 });
 
+test('JsonStore replaces one task file set without deleting other tasks', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-replace-source-'));
+  const store = new JsonStore(dir);
+  await store.init();
+
+  await store.upsertFile({ key: 'docs/old.txt', sourceId: 'docs', status: 'pending', size: 1 });
+  await store.upsertFile({ key: 'pics/a.jpg', sourceId: 'pics', status: 'synced', size: 2 });
+
+  assert.equal(await store.replaceFilesForSources(['docs'], [
+    { key: 'docs/new.txt', sourceId: 'docs', status: 'synced', size: 3 }
+  ]), 1);
+
+  assert.deepEqual((await store.listFiles()).map((file) => [file.key, file.status]), [
+    ['docs/new.txt', 'synced'],
+    ['pics/a.jpg', 'synced']
+  ]);
+});
+
 test('JsonStore serializes concurrent saves without tmp-file races', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-concurrent-'));
   const store = new JsonStore(dir);

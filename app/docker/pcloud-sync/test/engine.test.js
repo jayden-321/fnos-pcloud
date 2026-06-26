@@ -165,6 +165,62 @@ test('SyncEngine preserves cached existing files when a repeated scan skips remo
   assert.equal(stats.synced, 0);
 });
 
+test('SyncEngine batches cached scan state writes instead of upserting each unchanged file', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const files = ['a.txt', 'b.txt'];
+
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+
+  for (const filename of files) {
+    const filePath = path.join(sourceDir, filename);
+    await writeFile(filePath, filename);
+    const info = await stat(filePath);
+    await store.upsertFile({
+      key: `docs/${filename}`,
+      sourceId: 'docs',
+      absolutePath: filePath,
+      relativePath: filename,
+      remotePath: `/Sync/docs/${filename}`,
+      size: filename.length,
+      mtimeMs: Math.trunc(info.mtimeMs),
+      mtime: Math.trunc(info.mtimeMs / 1000),
+      status: 'synced'
+    });
+  }
+
+  store.upsertFile = async () => {
+    throw new Error('cached scans should batch file state writes');
+  };
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      listRemoteFiles: async () => {
+        throw new Error('cached scans should not list remote files');
+      },
+      ensureFolder: async () => {
+        throw new Error('unchanged files should not upload');
+      },
+      uploadFile: async () => {
+        throw new Error('unchanged files should not upload');
+      }
+    })
+  });
+
+  const result = await engine.scanNow();
+  const stats = await store.stats();
+
+  assert.equal(result.uploaded, 0);
+  assert.equal(result.unchanged, 2);
+  assert.equal(stats.synced, 2);
+});
+
 test('SyncEngine runs task scan and upload jobs sequentially by task', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const firstDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-first-'));

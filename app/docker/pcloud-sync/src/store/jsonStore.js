@@ -54,6 +54,35 @@ export class JsonStore {
     return structuredClone(this.state.files[file.key]);
   }
 
+  async replaceFilesForSources(sourceIds, files) {
+    const selected = Array.isArray(sourceIds)
+      ? sourceIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const now = new Date().toISOString();
+
+    if (selected.length > 0) {
+      for (const key of Object.keys(this.state.files)) {
+        if (selected.some((sourceId) => fileMatchesSource(this.state.files[key], sourceId))) {
+          delete this.state.files[key];
+        }
+      }
+    } else {
+      this.state.files = {};
+    }
+
+    for (const file of files) {
+      if (!file?.key) {
+        throw new Error('File record requires key');
+      }
+      this.state.files[file.key] = {
+        ...structuredClone(file),
+        updatedAt: now
+      };
+    }
+    await this.#save();
+    return files.length;
+  }
+
   async getFile(key) {
     return structuredClone(this.state.files[key] ?? null);
   }
