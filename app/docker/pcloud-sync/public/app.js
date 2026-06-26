@@ -1,4 +1,5 @@
 import { eventToLogRow, fileLogEvents, uploadToLogRow } from './logRows.js';
+import { taskStatusText } from './taskStatus.js';
 
 const TOKEN_MASK = '******';
 const form = document.querySelector('#settingsForm');
@@ -246,8 +247,7 @@ function renderTaskCards() {
     const counts = taskQueueCounts(task.id);
     const queue = queueByTask.get(task.id);
     const stats = statsByTask.get(task.id)?.stats || emptyStats();
-    const status = queueStatusText(queue?.status)
-      || (counts.failed > 0 ? '同步异常' : counts.pending + counts.uploading > 0 ? '等待同步' : '同步完成');
+    const status = taskStatusText({ queue, stats, counts });
     return `
       <article class="task-card">
         <div class="task-card-main">
@@ -390,17 +390,6 @@ function emptyStats() {
     pending: 0,
     uploading: 0
   };
-}
-
-function queueStatusText(status) {
-  return {
-    queued: '排队中',
-    running: '同步中',
-    pending: '等待同步',
-    completed: '同步完成',
-    failed: '同步异常',
-    stopped: '已停止'
-  }[status] || '';
 }
 
 function scheduleFromTask(task) {

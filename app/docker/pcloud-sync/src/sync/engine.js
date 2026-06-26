@@ -259,7 +259,6 @@ export class SyncEngine {
         return { skipped: true, reason: 'no enabled tasks' };
       }
       await this.store.clearFiles(requestedTaskIds.length > 0 ? { sourceIds: requestedTaskIds } : {});
-      const activeKeys = new Set();
       const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
       const result = {
         discovered: 0,
@@ -293,7 +292,7 @@ export class SyncEngine {
         this.currentTaskName = source.name;
         const taskResult = this.taskQueue.find((item) => item.id === source.id);
         Object.assign(taskResult, {
-          status: 'running',
+          status: 'scanning',
           startedAt: new Date().toISOString()
         });
         let discovered = [];
@@ -312,12 +311,14 @@ export class SyncEngine {
           continue;
         }
 
-        for (const file of discovered) {
-          activeKeys.add(file.key);
-        }
-
         let remoteFiles = null;
-        if (client?.listRemoteFiles) {
+        const needsRemoteListing = shouldListRemoteFiles({
+          source,
+          discovered,
+          known,
+          force: options.forceRemoteScan === true
+        });
+        if (client?.listRemoteFiles && needsRemoteListing) {
           try {
             remoteFiles = await client.listRemoteFiles(source.remotePath);
           } catch (error) {
@@ -338,16 +339,19 @@ export class SyncEngine {
         const planOptions = remoteFiles ? { remoteFiles } : {};
         result.remoteFiles += remoteFiles?.size ?? 0;
         const plan = planUploads(discovered, known, planOptions);
+        const existingCount = remoteFiles
+          ? plan.unchanged.length
+          : plan.unchanged.filter((file) => known.get(file.key)?.status === 'existing').length;
         result.discovered += discovered.length;
         result.queued += plan.pending.length;
-        result.existing += remoteFiles ? plan.unchanged.length : 0;
+        result.existing += existingCount;
         result.unchanged += plan.unchanged.length;
         result.missingLocal += plan.missingLocal.length;
         Object.assign(taskResult, {
           discovered: discovered.length,
           remoteFiles: remoteFiles?.size ?? 0,
           queued: plan.pending.length,
-          existing: remoteFiles ? plan.unchanged.length : 0
+          existing: existingCount
         });
 
         for (const file of plan.pending) {
@@ -359,22 +363,15 @@ export class SyncEngine {
           });
         }
 
-        if (remoteFiles) {
-          for (const file of plan.unchanged) {
-            const existing = known.get(file.key) ?? {};
-            await this.store.upsertFile({
-              ...file,
-              status: 'existing',
-              error: '',
-              retryCount: existing.retryCount ?? 0,
-              pcloudFileId: file.remote?.fileid ?? existing.pcloudFileId ?? null,
-              pcloudPath: joinRemote(source.remotePath, file.relativePath),
-              existingAt: new Date().toISOString()
-            });
-          }
+        for (const file of plan.unchanged) {
+          const existing = known.get(file.key) ?? {};
+          await this.store.upsertFile(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles)));
         }
 
         if (config.pcloud.accessToken && !this.stopRequested) {
+          Object.assign(taskResult, {
+            status: 'syncing'
+          });
           const uploadResult = await this.processPending(config, { resetStop: false, taskId: source.id });
           result.uploaded += uploadResult.uploaded;
           result.failed += uploadResult.failed;
@@ -475,7 +472,7 @@ export class SyncEngine {
         const queuedFiles = await this.store.listFiles({ sourceId: task.id, status: 'pending' });
         const uploadingFiles = await this.store.listFiles({ sourceId: task.id, status: 'uploading' });
         Object.assign(taskResult, {
-          status: 'running',
+          status: 'syncing',
           queued: queuedFiles.length + uploadingFiles.length,
           startedAt: new Date().toISOString()
         });
@@ -736,6 +733,59 @@ function joinRemote(...parts) {
     .filter(Boolean)
     .join('/');
   return `/${joined}`;
+}
+
+function shouldListRemoteFiles({ source, discovered, known, force = false }) {
+  if (discovered.length === 0) {
+    return false;
+  }
+  if (force) {
+    return true;
+  }
+
+  const taskFiles = knownFilesForTask(known, source.id);
+  if (taskFiles.length === 0) {
+    return true;
+  }
+
+  return taskFiles.some((file) => {
+    if (!file.relativePath) {
+      return true;
+    }
+    const expectedRemotePath = joinRemote(source.remotePath, file.relativePath);
+    return String(file.remotePath || '') !== expectedRemotePath;
+  });
+}
+
+function knownFilesForTask(known, taskId) {
+  return [...known.entries()]
+    .filter(([key, file]) => file?.sourceId === taskId || String(key).startsWith(`${taskId}/`))
+    .map(([, file]) => file);
+}
+
+function cachedUnchangedFile(source, file, existing, remoteListed) {
+  if (remoteListed) {
+    return {
+      ...file,
+      status: 'existing',
+      error: '',
+      retryCount: existing.retryCount ?? 0,
+      pcloudFileId: file.remote?.fileid ?? existing.pcloudFileId ?? null,
+      pcloudPath: joinRemote(source.remotePath, file.relativePath),
+      existingAt: new Date().toISOString()
+    };
+  }
+
+  const status = existing.status === 'existing' ? 'existing' : 'synced';
+  return {
+    ...existing,
+    ...file,
+    status,
+    error: '',
+    retryCount: existing.retryCount ?? 0,
+    pcloudFileId: existing.pcloudFileId ?? null,
+    pcloudPath: existing.pcloudPath ?? joinRemote(source.remotePath, file.relativePath)
+  };
 }
 
 function normalizeRelativePath(value) {
