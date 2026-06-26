@@ -11,10 +11,31 @@ export function eventToLogRow(event) {
     fileName,
     task: taskForFile(fileName),
     time: formatDateTime(event.at),
+    size: numberOrNull(event.size),
+    sizeText: formatBytes(event.size),
+    progressText: '',
     status: meta.status,
     statusText: meta.statusText,
     eventText: meta.eventText,
     detail: event.message || ''
+  };
+}
+
+export function uploadToLogRow(file, activeUpload = {}) {
+  const fileName = file?.key || activeUpload?.key || '同步文件';
+  const bytes = numberOrNull(activeUpload?.bytes);
+  const total = numberOrNull(activeUpload?.total) ?? numberOrNull(file?.size);
+  return {
+    fileName,
+    task: taskForFile(fileName),
+    time: formatDateTime(activeUpload?.updatedAt || file?.updatedAt),
+    size: total,
+    sizeText: formatBytes(total),
+    progressText: formatProgress(bytes, total),
+    status: 'uploading',
+    statusText: '上传中',
+    eventText: '上传',
+    detail: ''
   };
 }
 
@@ -29,6 +50,43 @@ function eventMeta(type) {
 function taskForFile(fileName) {
   const first = String(fileName).split('/').filter(Boolean)[0];
   return first || 'sync';
+}
+
+function formatProgress(bytes, total) {
+  if (bytes === null && total === null) {
+    return '';
+  }
+  if (total && total > 0) {
+    const uploaded = Math.max(0, bytes ?? 0);
+    const percent = Math.max(0, Math.min(100, Math.round((uploaded / total) * 100)));
+    return `${formatBytes(uploaded)} / ${formatBytes(total)} (${percent}%)`;
+  }
+  return bytes === null ? '' : formatBytes(bytes);
+}
+
+function formatBytes(value) {
+  const bytes = numberOrNull(value);
+  if (bytes === null) {
+    return '';
+  }
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${Math.round(bytes)} B`;
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 function formatDateTime(value) {

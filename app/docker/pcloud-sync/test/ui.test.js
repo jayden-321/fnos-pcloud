@@ -32,3 +32,13 @@ test('settings prioritizes task config and exposes log retention controls', asyn
   assert.match(html, /id="clearEvents"/);
   assert.match(html, /pCloud 官方文档未声明推荐并发/);
 });
+
+test('sync logs expose file size, progress, and uploading status filters', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+
+  assert.match(html, /<th>大小<\/th>/);
+  assert.match(html, /<th>进度<\/th>/);
+  assert.match(html, /<option value="uploading">上传中<\/option>/);
+  assert.match(script, /uploadToLogRow/);
+});

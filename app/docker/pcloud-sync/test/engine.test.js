@@ -62,7 +62,7 @@ test('SyncEngine uploads pending files and records pCloud file ids', async () =>
   assert.equal(result.uploaded, 1);
   assert.equal((await store.stats()).synced, 1);
   assert.equal(files[0].pcloudFileId, 99);
-  assert.ok(events.some((event) => event.type === 'upload_succeeded' && event.subject === 'docs/a.txt'));
+  assert.ok(events.some((event) => event.type === 'upload_succeeded' && event.subject === 'docs/a.txt' && event.size === 5));
   assert.deepEqual(calls.map((call) => call[0]), ['ensureFolder', 'uploadFile']);
   assert.equal(calls[0][1], '/NAS/Docs');
 });
@@ -192,25 +192,68 @@ test('SyncEngine exposes aggregate upload speed while uploads are active', async
         if (passedProgressHash) {
           assert.equal(progressHash, passedProgressHash);
         }
-        return { currentfileuploaded: 5, currentfilesize: 5 };
+        return { currentfileuploaded: uploadProgressCalls > 1 ? 5 : 0, currentfilesize: 5 };
       },
       uploadFile: async ({ progressHash }) => {
         passedProgressHash = progressHash;
-        await waitFor(() => uploadProgressCalls > 0);
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await waitFor(() => uploadProgressCalls > 1, 2500);
         return { fileids: [105], metadata: [{ fileid: 105, name: 'speed.txt' }] };
       }
     })
   });
 
   const processing = engine.processPending();
-  await waitFor(() => engine.getStatus().uploadSpeedBytesPerSecond > 0);
+  await waitFor(() => engine.getStatus().uploadSpeedBytesPerSecond > 0, 2500);
   assert.ok(engine.getStatus().uploadSpeedBytesPerSecond > 0);
   await processing;
 
   assert.ok(passedProgressHash.startsWith('pcloud-nas-sync-'));
   assert.ok(uploadProgressCalls > 0);
   assert.equal(engine.getStatus().uploadSpeedBytesPerSecond, 0);
+});
+
+test('SyncEngine does not calculate upload speed from the first pCloud progress sample', async () => {
+  const engine = new SyncEngine({ store: {}, pcloudFactory: () => ({}) });
+  engine.activeUploads.set('docs/large.bin', {
+    bytes: 0,
+    total: 0,
+    lastBytes: 0,
+    lastAt: Date.now(),
+    speed: 0,
+    startedAt: Date.now(),
+    updatedAt: Date.now()
+  });
+
+  engine.recordUploadProgressFromApi('docs/large.bin', {
+    currentfileuploaded: 220000 * 1024 * 1024,
+    currentfilesize: 250000 * 1024 * 1024
+  });
+
+  assert.equal(engine.getStatus().uploadSpeedBytesPerSecond, 0);
+});
+
+test('SyncEngine calculates upload speed after a real progress sampling window', async () => {
+  const engine = new SyncEngine({ store: {}, pcloudFactory: () => ({}) });
+  const startedAt = Date.now() - 1200;
+  engine.activeUploads.set('docs/large.bin', {
+    bytes: 100 * 1024 * 1024,
+    total: 250000 * 1024 * 1024,
+    lastBytes: 100 * 1024 * 1024,
+    lastAt: startedAt,
+    speed: 0,
+    hasProgressSample: true,
+    startedAt,
+    updatedAt: startedAt
+  });
+
+  engine.recordUploadProgressFromApi('docs/large.bin', {
+    currentfileuploaded: 112 * 1024 * 1024,
+    currentfilesize: 250000 * 1024 * 1024
+  });
+
+  const speed = engine.getStatus().uploadSpeedBytesPerSecond;
+  assert.ok(speed > 8 * 1024 * 1024);
+  assert.ok(speed < 14 * 1024 * 1024);
 });
 
 test('SyncEngine uses pCloud API server selection before uploading', async () => {

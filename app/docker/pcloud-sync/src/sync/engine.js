@@ -4,6 +4,8 @@ import { PCloudClient } from '../pcloud/client.js';
 import { scanSource } from '../scanner/scanner.js';
 import { planUploads } from './planner.js';
 
+const MIN_UPLOAD_SPEED_SAMPLE_MS = 500;
+
 export class SyncEngine {
   constructor({ store, pcloudFactory } = {}) {
     this.store = store;
@@ -25,7 +27,8 @@ export class SyncEngine {
       activeUploads: [...this.activeUploads.entries()].map(([key, upload]) => ({
         key,
         bytes: upload.bytes,
-        total: upload.total
+        total: upload.total,
+        updatedAt: upload.updatedAt
       }))
     };
   }
@@ -181,6 +184,7 @@ export class SyncEngine {
           lastBytes: 0,
           lastAt: Date.now(),
           speed: 0,
+          hasProgressSample: false,
           startedAt: Date.now(),
           updatedAt: Date.now()
         });
@@ -207,14 +211,14 @@ export class SyncEngine {
           pcloudPath,
           syncedAt: new Date().toISOString()
         });
-        await this.store.addEvent('upload_succeeded', file.key, pcloudPath);
+        await this.store.addEvent('upload_succeeded', file.key, pcloudPath, { size: Number(file.size || 0) });
         uploaded += 1;
       } catch (error) {
         await this.store.setStatus(file.key, 'failed', {
           error: error.message,
           retryCount: Number(file.retryCount || 0) + 1
         });
-        await this.store.addEvent('upload_failed', file.key, error.message);
+        await this.store.addEvent('upload_failed', file.key, error.message, { size: Number(file.size || 0) });
         failed += 1;
       } finally {
         this.activeUploads.delete(file.key);
@@ -303,14 +307,20 @@ export class SyncEngine {
       lastBytes: 0,
       lastAt: now,
       speed: 0,
+      hasProgressSample: false,
       startedAt: now,
       updatedAt: now
     };
-    const elapsedSeconds = Math.max((now - current.lastAt) / 1000, 0.001);
+    const elapsedMs = Math.max(0, now - Number(current.lastAt || now));
     const delta = Math.max(0, uploaded - Number(current.lastBytes || 0));
     current.bytes = uploaded;
     current.total = total || current.total;
-    current.speed = Math.round(delta / elapsedSeconds);
+    if (!current.hasProgressSample || elapsedMs < MIN_UPLOAD_SPEED_SAMPLE_MS) {
+      current.speed = Number(current.speed || 0);
+      current.hasProgressSample = true;
+    } else {
+      current.speed = Math.round(delta / (elapsedMs / 1000));
+    }
     current.lastBytes = uploaded;
     current.lastAt = now;
     current.updatedAt = now;

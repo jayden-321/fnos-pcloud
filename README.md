@@ -10,9 +10,10 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Local folder picker for NAS paths that are visible inside the container.
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, synced files, failed files, pending files, active uploads, and aggregate upload speed.
-- Filterable file-level sync logs.
+- Filterable file-level sync logs with file size and active upload progress.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
+- The raw app port binds to host loopback by default so unauthenticated APIs stay behind the fnOS reverse proxy.
 
 ## pCloud Authorization
 
@@ -77,6 +78,22 @@ args:
   NODE_BASE_IMAGE: docker.m.daocloud.io/library/node:22-alpine
 ```
 
+## Network Exposure
+
+The app API does not have built-in authentication. It is intended to be reached
+through the fnOS desktop reverse proxy, which performs login enforcement before
+proxying requests to the app. For that reason, Docker Compose binds the raw
+service port to `127.0.0.1` by default:
+
+```yaml
+ports:
+  - "${TRIM_SERVICE_BIND:-127.0.0.1}:${TRIM_SERVICE_PORT:-17880}:8080"
+```
+
+Only set `TRIM_SERVICE_BIND=0.0.0.0` if direct LAN access is intentional and you
+accept that it bypasses fnOS reverse-proxy authorization. See
+[SECURITY.md](SECURITY.md) for details.
+
 ## Local Development
 
 ```bash
@@ -97,13 +114,14 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.2 is one-way upload only, not two-way sync.
-- v0.2.2 does not propagate local deletions to pCloud.
+- v0.2.3 is one-way upload only, not two-way sync.
+- v0.2.3 does not propagate local deletions to pCloud.
 - File changes are discovered by periodic scans. The default interval is 300 seconds, and users can trigger a manual scan in the UI.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.2.3: Adds file size and active upload progress to Sync Logs, fixes unrealistic upload speed spikes by treating the first pCloud `uploadprogress` response as a baseline, and binds the raw app port to host loopback by default.
 - v0.2.2: Adds configurable sync log retention by age and count, plus a one-click log delete action. Settings now shows task configuration first, documents that pCloud official upload docs do not publish a recommended concurrency number, and removes decorative sidebar branding.
 - v0.2.1: Bumps the package version for fnOS installation and upgrade detection. Sync logs now show file-level upload rows, task cards are compact, saved access tokens display a masked value, and deleting all tasks also clears migrated legacy `sources`.
 - v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`.

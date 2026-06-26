@@ -1,4 +1,4 @@
-import { eventToLogRow, fileLogEvents } from './logRows.js';
+import { eventToLogRow, fileLogEvents, uploadToLogRow } from './logRows.js';
 
 const TOKEN_MASK = '******';
 const form = document.querySelector('#settingsForm');
@@ -216,7 +216,7 @@ async function refreshStatus() {
     </tr>
   `).join('') || '<tr><td colspan="3">暂无失败、待上传或上传中文件</td></tr>';
 
-  updateTaskOptions(fileLogEvents(currentEvents));
+  updateTaskOptions(currentLogRows());
   renderEvents();
   renderTaskCards();
 }
@@ -356,9 +356,9 @@ async function loadFolder(targetPath) {
   `).join('') || '<li class="empty">没有子文件夹</li>';
 }
 
-function updateTaskOptions(events) {
+function updateTaskOptions(rows) {
   const selected = eventFilters.task.value;
-  const tasks = [...new Set(events.map((event) => eventToLogRow(event).task))].filter(Boolean).sort();
+  const tasks = [...new Set(rows.map((row) => row.task))].filter(Boolean).sort();
   eventFilters.task.innerHTML = [
     '<option value="">全部任务</option>',
     ...tasks.map((task) => `<option value="${escapeHtml(task)}">${escapeHtml(task)}</option>`)
@@ -368,12 +368,18 @@ function updateTaskOptions(events) {
   }
 }
 
+function currentLogRows() {
+  const activeUploads = new Map((currentStatus?.engine?.activeUploads || []).map((upload) => [upload.key, upload]));
+  const uploadingRows = (currentStatus?.uploading || []).map((file) => uploadToLogRow(file, activeUploads.get(file.key)));
+  const eventRows = fileLogEvents(currentEvents).map(eventToLogRow);
+  return [...uploadingRows, ...eventRows];
+}
+
 function renderEvents() {
   const taskFilter = eventFilters.task.value;
   const statusFilter = eventFilters.status.value;
   const search = eventFilters.search.value.trim().toLowerCase();
-  const rows = fileLogEvents(currentEvents)
-    .map(eventToLogRow)
+  const rows = currentLogRows()
     .filter((row) => !taskFilter || row.task === taskFilter)
     .filter((row) => !statusFilter || row.status === statusFilter)
     .filter((row) => !search || row.fileName.toLowerCase().includes(search))
@@ -382,15 +388,17 @@ function renderEvents() {
   document.querySelector('#events').innerHTML = rows.map((row) => `
     <tr>
       <td title="${escapeHtml(row.fileName)}">${escapeHtml(row.fileName)}</td>
+      <td>${escapeHtml(row.sizeText)}</td>
       <td>${escapeHtml(row.task)}</td>
       <td>${escapeHtml(row.time)}</td>
       <td><span class="log-status ${escapeHtml(row.status)}">${escapeHtml(row.statusText)}</span></td>
+      <td>${escapeHtml(row.progressText)}</td>
       <td title="${escapeHtml(row.detail)}">
         <span>${escapeHtml(row.eventText)}</span>
         ${row.detail ? `<small>${escapeHtml(row.detail)}</small>` : ''}
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="5" class="empty">暂无文件同步日志</td></tr>';
+  `).join('') || '<tr><td colspan="7" class="empty">暂无文件同步日志</td></tr>';
 }
 
 function formatBytesPerSecond(bytes) {

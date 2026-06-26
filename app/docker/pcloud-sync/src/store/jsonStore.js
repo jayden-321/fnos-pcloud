@@ -135,8 +135,9 @@ export class JsonStore {
     return count;
   }
 
-  async addEvent(type, subject, message) {
+  async addEvent(type, subject, message, details = {}) {
     this.state.events.unshift({
+      ...structuredClone(details ?? {}),
       type,
       subject,
       message,

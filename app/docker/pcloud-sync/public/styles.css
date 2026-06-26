@@ -362,7 +362,7 @@ td:first-child {
 }
 
 .log-table {
-  min-width: 860px;
+  min-width: 1040px;
 }
 
 .log-table th {
@@ -389,14 +389,19 @@ td:first-child {
   width: auto;
 }
 
-.log-table th:nth-child(1) { width: 32%; }
-.log-table th:nth-child(2) { width: 18%; }
-.log-table th:nth-child(3) { width: 22%; }
-.log-table th:nth-child(4) { width: 11%; }
+.log-table th:nth-child(1) { width: 31%; }
+.log-table th:nth-child(2) { width: 10%; }
+.log-table th:nth-child(3) { width: 12%; }
+.log-table th:nth-child(4) { width: 18%; }
+.log-table th:nth-child(5) { width: 9%; }
+.log-table th:nth-child(6) { width: 12%; }
+.log-table th:nth-child(7) { width: 8%; }
 
 .log-table td:nth-child(2),
 .log-table td:nth-child(3),
-.log-table td:nth-child(5) {
+.log-table td:nth-child(4),
+.log-table td:nth-child(6),
+.log-table td:nth-child(7) {
   color: #7890ad;
 }
 
@@ -415,6 +420,7 @@ td:first-child {
 
 .log-status.success { color: var(--green); }
 .log-status.failed { color: var(--danger); }
+.log-status.uploading { color: var(--accent); }
 .log-status.queued { color: var(--queued); }
 
 .empty,

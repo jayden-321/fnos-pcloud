@@ -10,8 +10,13 @@ services:
       DATA_DIR: /data
       PORT: 8080
       NODE_ENV: production
+    # The app API has no built-in authentication; access control is expected to
+    # come from the fnOS desktop reverse proxy. Bind the published host port to
+    # loopback by default so the raw unauthenticated API is not reachable from
+    # the LAN. Set TRIM_SERVICE_BIND=0.0.0.0 only when direct LAN access is
+    # intentional and the risk is understood.
     ports:
-      - "${TRIM_SERVICE_PORT:-17880}:8080"
+      - "${TRIM_SERVICE_BIND:-127.0.0.1}:${TRIM_SERVICE_PORT:-17880}:8080"
     volumes:
       - "${TRIM_PKGVAR:-./data}:/data"
       - "/vol1:/vol1:ro"

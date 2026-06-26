@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eventToLogRow, fileLogEvents } from '../public/logRows.js';
+import { eventToLogRow, fileLogEvents, uploadToLogRow } from '../public/logRows.js';
 
 test('sync log source keeps per-file upload events only', () => {
   const events = [
@@ -18,14 +18,43 @@ test('sync log row maps one file event to table columns', () => {
     type: 'upload_failed',
     subject: 'MACOS/MK-unlocker/backup/vmwarebase.dll',
     message: 'socket hang up',
+    size: 5 * 1024 * 1024,
     at: '2026-06-26T11:02:40.000Z'
   });
 
   assert.equal(row.fileName, 'MACOS/MK-unlocker/backup/vmwarebase.dll');
   assert.equal(row.task, 'MACOS');
+  assert.equal(row.sizeText, '5.0 MB');
+  assert.equal(row.progressText, '');
   assert.equal(row.status, 'failed');
   assert.equal(row.statusText, '失败');
   assert.equal(row.eventText, '上传');
   assert.equal(row.detail, 'socket hang up');
   assert.match(row.time, /^2026-06-26 \d{2}:02:40$/);
+});
+
+test('sync log row maps an active upload to size and progress columns', () => {
+  const row = uploadToLogRow(
+    {
+      key: 'MACOS/MK-unlocker/backup/vmwarebase.dll',
+      sourceId: 'MACOS',
+      size: 100,
+      updatedAt: '2026-06-26T11:04:40.000Z'
+    },
+    {
+      key: 'MACOS/MK-unlocker/backup/vmwarebase.dll',
+      bytes: 25,
+      total: 100,
+      updatedAt: '2026-06-26T11:05:40.000Z'
+    }
+  );
+
+  assert.equal(row.fileName, 'MACOS/MK-unlocker/backup/vmwarebase.dll');
+  assert.equal(row.task, 'MACOS');
+  assert.equal(row.sizeText, '100 B');
+  assert.equal(row.progressText, '25 B / 100 B (25%)');
+  assert.equal(row.status, 'uploading');
+  assert.equal(row.statusText, '上传中');
+  assert.equal(row.eventText, '上传');
+  assert.match(row.time, /^2026-06-26 \d{2}:05:40$/);
 });

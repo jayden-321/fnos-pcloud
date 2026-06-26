@@ -13,7 +13,7 @@ test('JsonStore persists config and file records with aggregate stats', async ()
   await store.saveConfig({ port: 8080, sources: [] });
   await store.upsertFile({ key: 'photos/a.jpg', status: 'synced', size: 12 });
   await store.upsertFile({ key: 'photos/b.jpg', status: 'failed', size: 8, error: 'quota' });
-  await store.addEvent('upload_failed', 'photos/b.jpg', 'quota');
+  await store.addEvent('upload_failed', 'photos/b.jpg', 'quota', { size: 8 });
 
   assert.deepEqual(await store.stats(), {
     total: 2,
@@ -32,6 +32,7 @@ test('JsonStore persists config and file records with aggregate stats', async ()
 
   const disk = JSON.parse(await readFile(path.join(dir, 'state.json'), 'utf8'));
   assert.equal(disk.files['photos/b.jpg'].error, 'quota');
+  assert.equal(disk.events[0].size, 8);
 });
 
 test('JsonStore serializes concurrent saves without tmp-file races', async () => {
