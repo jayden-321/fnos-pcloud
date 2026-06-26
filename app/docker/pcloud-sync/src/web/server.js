@@ -59,6 +59,7 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     const config = normalizeConfig(mergeConfig(previous, body));
     await store.saveConfig(config);
     await store.pruneEvents();
+    await engine.refreshWatchers?.(config);
     return json(redactConfig(config));
   }
 

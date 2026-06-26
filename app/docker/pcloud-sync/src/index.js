@@ -23,16 +23,9 @@ const server = listen(app, config.port);
 
 console.log(`pCloud NAS Sync listening on ${config.port}`);
 
-setTimeout(() => {
-  engine.scanNow().catch((error) => {
-    console.error(`Initial scan failed: ${error.message}`);
-  });
-}, 2500).unref?.();
-
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     engine.stop();
     server.close(() => process.exit(0));
   });
 }
-

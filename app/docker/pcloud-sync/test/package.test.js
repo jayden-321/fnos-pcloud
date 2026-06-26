@@ -9,3 +9,10 @@ test('Dockerfile uses a domestic explicit base image by default', async () => {
   assert.match(dockerfile, /^ARG\s+NODE_BASE_IMAGE=docker\.m\.daocloud\.io\/library\/node:22-alpine/m);
   assert.match(dockerfile, /^FROM\s+\$\{NODE_BASE_IMAGE\}/m);
 });
+
+test('app startup does not trigger a full sync scan automatically', async () => {
+  const entry = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(entry, /setTimeout\(\(\)\s*=>\s*{\s*engine\.scanNow/s);
+  assert.doesNotMatch(entry, /Initial scan failed/);
+});

@@ -12,6 +12,8 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, active uploads, and aggregate upload speed.
 - Task queue execution: each task scans and uploads before the next task starts.
 - Per-task scheduling: manual, interval, daily, and weekly schedules are supported.
+- Scheduled runs drain a local filesystem watcher queue instead of rescanning every task directory.
+- Manual scans still perform full local and pCloud reconciliation when you need to rebuild or verify state.
 - Filterable file-level sync logs with file size and active upload progress.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
@@ -117,13 +119,15 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.7 is one-way upload only, not two-way sync.
-- v0.2.7 does not propagate local deletions to pCloud.
-- File changes are discovered by periodic scans. The default interval is 300 seconds, and users can trigger a manual scan in the UI.
+- v0.2.8 is one-way upload only, not two-way sync.
+- v0.2.8 does not propagate local deletions to pCloud.
+- Manual scans can still take time on very large folders because they intentionally reconcile the local tree with the pCloud destination.
+- Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.2.8: Changes scheduled runs to drain a local filesystem watcher queue instead of rescanning every task directory. Manual scans still perform full local and pCloud reconciliation, startup no longer triggers an automatic full scan, and watcher-unavailable tasks fall back to full scans with a `watch_failed` log event.
 - v0.2.7: Adds task-queue execution so one task scans and uploads before the next task starts. The dashboard shows current-task metrics while a task is running, task cards show per-task counts, and each task can run manually, by interval, daily, or weekly.
 - v0.2.6: Improves takeover of existing pCloud folders. On the first scan of a destination, files with the same relative path and size are counted as Existing even if pCloud reports a different modified time. Later same-size local changes still upload because the planner keeps previous scan metadata before rebuilding the visible queue. Scan completion events now include the remote file count.
 - v0.2.5: Rebuilds file state from the current task set at the start of each scan, clearing stale pending or failed records left by previous tasks. Adds a separate Existing metric for files that already match the pCloud destination so remote matches no longer inflate the uploaded count.

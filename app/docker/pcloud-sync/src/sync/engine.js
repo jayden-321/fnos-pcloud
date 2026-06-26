@@ -1,7 +1,9 @@
+import { watch } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeConfig } from '../config/config.js';
 import { PCloudClient } from '../pcloud/client.js';
-import { scanSource } from '../scanner/scanner.js';
+import { isIgnored, scanSource } from '../scanner/scanner.js';
 import { planUploads } from './planner.js';
 
 const MIN_UPLOAD_SPEED_SAMPLE_MS = 500;
@@ -20,6 +22,9 @@ export class SyncEngine {
     this.currentTaskName = '';
     this.taskQueue = [];
     this.scheduleSlots = new Map();
+    this.watchers = new Map();
+    this.changedFiles = new Map();
+    this.changedTasks = new Set();
   }
 
   getStatus() {
@@ -32,6 +37,13 @@ export class SyncEngine {
       currentTaskId: this.currentTaskId,
       currentTaskName: this.currentTaskName,
       taskQueue: structuredClone(this.taskQueue),
+      queuedLocalChanges: this.changedFiles.size + this.changedTasks.size,
+      watchers: [...this.watchers.values()].map((entry) => ({
+        taskId: entry.taskId,
+        path: entry.path,
+        supported: entry.supported,
+        error: entry.error || ''
+      })),
       uploadSpeedBytesPerSecond: this.uploadSpeedBytesPerSecond(),
       activeUploads: [...this.activeUploads.entries()].map(([key, upload]) => ({
         key,
@@ -46,10 +58,13 @@ export class SyncEngine {
     if (this.timer) {
       clearInterval(this.timer);
     }
+    await this.refreshWatchers();
     this.timer = setInterval(() => {
-      this.runDueTasks().catch((error) => {
-        this.lastError = error.message;
-      });
+      this.refreshWatchers()
+        .then(() => this.runDueTasks())
+        .catch((error) => {
+          this.lastError = error.message;
+        });
     }, 30 * 1000);
     this.timer.unref?.();
   }
@@ -58,6 +73,166 @@ export class SyncEngine {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    for (const entry of this.watchers.values()) {
+      entry.watcher?.close();
+    }
+    this.watchers.clear();
+  }
+
+  queueLocalChange(taskId, relativePath = '') {
+    const id = String(taskId || '').trim();
+    if (!id) {
+      return;
+    }
+    const relative = normalizeRelativePath(relativePath);
+    if (!relative) {
+      this.changedTasks.add(id);
+      return;
+    }
+    this.changedFiles.set(`${id}/${relative}`, {
+      taskId: id,
+      relativePath: relative,
+      at: Date.now()
+    });
+  }
+
+  async refreshWatchers(config = null) {
+    const normalized = config ?? normalizeConfig(await this.store.loadConfig() ?? {});
+    const enabledTasks = normalized.tasks.filter((task) => task.enabled);
+    const taskPaths = new Map(enabledTasks.map((task) => [task.id, path.resolve(task.localPath)]));
+
+    for (const [taskId, entry] of this.watchers) {
+      if (taskPaths.get(taskId) !== entry.path) {
+        entry.watcher?.close();
+        this.watchers.delete(taskId);
+      }
+    }
+
+    for (const task of enabledTasks) {
+      const root = path.resolve(task.localPath);
+      if (this.watchers.get(task.id)?.path === root) {
+        continue;
+      }
+      try {
+        const watcher = watch(root, { recursive: true }, (_eventType, filename) => {
+          this.queueLocalChange(task.id, filename || '');
+        });
+        watcher.unref?.();
+        this.watchers.set(task.id, {
+          taskId: task.id,
+          path: root,
+          supported: true,
+          watcher
+        });
+      } catch (error) {
+        this.changedTasks.add(task.id);
+        this.watchers.set(task.id, {
+          taskId: task.id,
+          path: root,
+          supported: false,
+          error: error.message
+        });
+        await this.store.addEvent('watch_failed', task.name, error.message).catch(() => {});
+      }
+    }
+  }
+
+  async flushLocalChanges(config = null) {
+    if (this.changedFiles.size === 0) {
+      return { queued: 0, ignored: 0, missing: 0, failed: 0 };
+    }
+    const normalized = config ?? normalizeConfig(await this.store.loadConfig() ?? {});
+    const tasks = new Map(normalized.tasks.filter((task) => task.enabled).map((task) => [task.id, task]));
+    const entries = [...this.changedFiles.entries()];
+    const result = { queued: 0, ignored: 0, missing: 0, failed: 0 };
+
+    for (const [changeKey, change] of entries) {
+      const task = tasks.get(change.taskId);
+      if (!task) {
+        this.changedFiles.delete(changeKey);
+        continue;
+      }
+
+      const relativePath = normalizeRelativePath(change.relativePath);
+      if (!relativePath) {
+        this.changedTasks.add(task.id);
+        this.changedFiles.delete(changeKey);
+        continue;
+      }
+      if (isIgnored(relativePath, path.posix.basename(relativePath), normalized.sync.ignorePatterns)) {
+        result.ignored += 1;
+        this.changedFiles.delete(changeKey);
+        continue;
+      }
+
+      const root = path.resolve(task.localPath);
+      const absolutePath = path.resolve(root, ...relativePath.split('/'));
+      if (!isPathInside(absolutePath, root)) {
+        result.ignored += 1;
+        this.changedFiles.delete(changeKey);
+        continue;
+      }
+
+      let info;
+      try {
+        info = await stat(absolutePath);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          result.missing += 1;
+          this.changedFiles.delete(changeKey);
+          continue;
+        }
+        result.failed += 1;
+        await this.store.addEvent('scan_failed', absolutePath, error.message).catch(() => {});
+        continue;
+      }
+
+      if (info.isDirectory()) {
+        this.changedTasks.add(task.id);
+        this.changedFiles.delete(changeKey);
+        continue;
+      }
+      if (!info.isFile()) {
+        result.ignored += 1;
+        this.changedFiles.delete(changeKey);
+        continue;
+      }
+
+      const fileKey = `${task.id}/${relativePath}`;
+      const existing = await this.store.getFile(fileKey);
+      await this.store.upsertFile({
+        key: fileKey,
+        sourceId: task.id,
+        absolutePath,
+        relativePath,
+        remotePath: joinRemote(task.remotePath, relativePath),
+        size: info.size,
+        mtimeMs: Math.trunc(info.mtimeMs),
+        mtime: Math.trunc(info.mtimeMs / 1000),
+        status: 'pending',
+        error: '',
+        retryCount: existing?.retryCount ?? 0
+      });
+      result.queued += 1;
+      this.changedFiles.delete(changeKey);
+    }
+    return result;
+  }
+
+  clearQueuedChangesForTasks(taskIds = null) {
+    const selected = Array.isArray(taskIds) && taskIds.length > 0
+      ? new Set(taskIds)
+      : null;
+    for (const [changeKey, change] of this.changedFiles) {
+      if (!selected || selected.has(change.taskId)) {
+        this.changedFiles.delete(changeKey);
+      }
+    }
+    for (const taskId of [...this.changedTasks]) {
+      if (!selected || selected.has(taskId)) {
+        this.changedTasks.delete(taskId);
+      }
     }
   }
 
@@ -77,6 +252,7 @@ export class SyncEngine {
       const tasks = config.tasks
         .filter((item) => item.enabled)
         .filter((item) => requestedTaskIds.length === 0 || requestedTaskIds.includes(item.id));
+      this.clearQueuedChangesForTasks(requestedTaskIds.length > 0 ? requestedTaskIds : null);
       await this.store.clearFiles(requestedTaskIds.length > 0 ? { sourceIds: requestedTaskIds } : {});
       const activeKeys = new Set();
       const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
@@ -233,19 +409,100 @@ export class SyncEngine {
   }
 
   async runDueTasks(now = new Date()) {
+    if (this.running) {
+      return 0;
+    }
     const config = normalizeConfig(await this.store.loadConfig() ?? {});
+    await this.flushLocalChanges(config);
     const dueTasks = config.tasks.filter((task) => task.enabled && taskIsDue(task, config.sync, now, this.scheduleSlots));
     if (dueTasks.length === 0) {
       return 0;
     }
-    const scanResult = await this.scanNow({ taskIds: dueTasks.map((task) => task.id), trigger: 'schedule' });
-    if (scanResult?.skipped) {
-      return 0;
+
+    const fullScanTasks = dueTasks.filter((task) => this.changedTasks.has(task.id) || watcherUnavailableForTask(this.watchers, task.id));
+    const fullScanTaskIds = new Set(fullScanTasks.map((task) => task.id));
+    const queueTasks = dueTasks.filter((task) => !fullScanTaskIds.has(task.id));
+    if (fullScanTasks.length > 0) {
+      const scanResult = await this.scanNow({ taskIds: fullScanTasks.map((task) => task.id), trigger: 'schedule' });
+      if (scanResult?.skipped) {
+        return 0;
+      }
+      for (const task of fullScanTasks) {
+        rememberTaskScheduleSlot(this.scheduleSlots, task, config.sync, now);
+      }
+      if (queueTasks.length === 0) {
+        return dueTasks.length;
+      }
     }
-    for (const task of dueTasks) {
-      rememberTaskScheduleSlot(this.scheduleSlots, task, config.sync, now);
+
+    const tasksToDrain = queueTasks.length > 0 ? queueTasks : dueTasks;
+    if (tasksToDrain.length === 0) {
+      return dueTasks.length;
     }
-    return dueTasks.length;
+
+    this.running = true;
+    this.stopRequested = false;
+    this.lastError = '';
+    this.taskQueue = tasksToDrain.map((task) => ({
+      id: task.id,
+      name: task.name,
+      status: 'queued',
+      discovered: 0,
+      remoteFiles: 0,
+      existing: 0,
+      queued: 0,
+      uploaded: 0,
+      failed: 0,
+      stopped: 0
+    }));
+
+    let uploaded = 0;
+    let failed = 0;
+    let stopped = 0;
+    try {
+      for (const task of tasksToDrain) {
+        if (this.stopRequested) {
+          break;
+        }
+        this.currentTaskId = task.id;
+        this.currentTaskName = task.name;
+        const taskResult = this.taskQueue.find((item) => item.id === task.id);
+        const queuedFiles = await this.store.listFiles({ sourceId: task.id, status: 'pending' });
+        const uploadingFiles = await this.store.listFiles({ sourceId: task.id, status: 'uploading' });
+        Object.assign(taskResult, {
+          status: 'running',
+          queued: queuedFiles.length + uploadingFiles.length,
+          startedAt: new Date().toISOString()
+        });
+        const uploadResult = await this.processPending(config, { resetStop: false, taskId: task.id });
+        uploaded += uploadResult.uploaded;
+        failed += uploadResult.failed;
+        stopped += uploadResult.stopped ?? 0;
+        Object.assign(taskResult, {
+          uploaded: uploadResult.uploaded,
+          failed: uploadResult.failed,
+          stopped: uploadResult.stopped ?? 0,
+          status: this.stopRequested || uploadResult.stopped > 0
+            ? 'stopped'
+            : uploadResult.failed > 0
+              ? 'failed'
+              : 'completed',
+          finishedAt: new Date().toISOString()
+        });
+        rememberTaskScheduleSlot(this.scheduleSlots, task, config.sync, now);
+      }
+      this.lastRunAt = new Date().toISOString();
+      await this.store.addEvent('scheduled_completed', 'sync', `${tasksToDrain.length} tasks, ${uploaded} uploaded, ${failed} failed`);
+      return dueTasks.length;
+    } catch (error) {
+      this.lastError = error.message;
+      await this.store.addEvent('scheduled_failed', 'sync', error.message);
+      throw error;
+    } finally {
+      this.currentTaskId = '';
+      this.currentTaskName = '';
+      this.running = false;
+    }
   }
 
   async retryFailed() {
@@ -474,6 +731,28 @@ function joinRemote(...parts) {
     .filter(Boolean)
     .join('/');
   return `/${joined}`;
+}
+
+function normalizeRelativePath(value) {
+  const raw = String(value || '').replaceAll('\\', '/').trim();
+  if (!raw) {
+    return '';
+  }
+  const parts = raw.split('/').filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..')) {
+    return '';
+  }
+  return parts.join('/');
+}
+
+function isPathInside(target, root) {
+  const relative = path.relative(root, target);
+  return !relative || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function watcherUnavailableForTask(watchers, taskId) {
+  const entry = watchers.get(taskId);
+  return Boolean(entry && entry.supported === false);
 }
 
 function normalizeTaskIds(value) {
