@@ -9,10 +9,10 @@ Never commit:
 - pCloud access token
 - pCloud account password
 - `.env` files
-- `state.json`
+- `state.sqlite`, `state.sqlite-wal`, `state.sqlite-shm`, or legacy `state.json`
 - generated `.fpk` packages that may contain local test state
 
-The app stores runtime configuration inside the Docker volume mounted at `/data`. That state is local to the NAS and is ignored by git.
+The app stores runtime configuration and sync state in SQLite inside the Docker volume mounted at `/data`. That state is local to the NAS and is ignored by git.
 
 If a secret is accidentally committed:
 

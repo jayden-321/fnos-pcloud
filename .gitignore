@@ -9,6 +9,8 @@ npm-debug.log*
 .data/
 data/
 state.json
+state.sqlite
+state.sqlite-*
 *.tmp
 work/
 docs/superpowers/

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { JsonStore } from '../src/store/jsonStore.js';
+import { SqliteStore } from '../src/store/sqliteStore.js';
 
-test('JsonStore persists config and file records with aggregate stats', async () => {
+test('SqliteStore persists config and file records with aggregate stats', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
 
   await store.saveConfig({ port: 8080, sources: [] });
@@ -26,20 +26,17 @@ test('JsonStore persists config and file records with aggregate stats', async ()
     bytesSynced: 12
   });
 
-  const reloaded = new JsonStore(dir);
+  const reloaded = new SqliteStore(dir);
   await reloaded.init();
   assert.equal((await reloaded.loadConfig()).port, 8080);
   assert.equal((await reloaded.listFiles()).length, 3);
   assert.equal((await reloaded.listEvents()).length, 1);
-
-  const disk = JSON.parse(await readFile(path.join(dir, 'state.json'), 'utf8'));
-  assert.equal(disk.files['photos/b.jpg'].error, 'quota');
-  assert.equal(disk.events[0].size, 8);
+  assert.equal((await stat(path.join(dir, 'state.sqlite'))).isFile(), true);
 });
 
-test('JsonStore clears file records for a fresh scan rebuild', async () => {
+test('SqliteStore clears file records for a fresh scan rebuild', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-clear-files-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
 
   await store.upsertFile({ key: 'old/a.txt', status: 'pending', size: 1 });
@@ -58,9 +55,9 @@ test('JsonStore clears file records for a fresh scan rebuild', async () => {
   });
 });
 
-test('JsonStore stats can be scoped to one task', async () => {
+test('SqliteStore stats can be scoped to one task', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-task-stats-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
 
   await store.upsertFile({ key: 'docs/a.txt', sourceId: 'docs', status: 'synced', size: 10 });
@@ -78,9 +75,9 @@ test('JsonStore stats can be scoped to one task', async () => {
   });
 });
 
-test('JsonStore replaces one task file set without deleting other tasks', async () => {
+test('SqliteStore replaces one task file set without deleting other tasks', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-replace-source-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
 
   await store.upsertFile({ key: 'docs/old.txt', sourceId: 'docs', status: 'pending', size: 1 });
@@ -96,9 +93,9 @@ test('JsonStore replaces one task file set without deleting other tasks', async 
   ]);
 });
 
-test('JsonStore serializes concurrent saves without tmp-file races', async () => {
+test('SqliteStore serializes concurrent saves without tmp-file races', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-concurrent-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
 
   await Promise.all(Array.from({ length: 50 }, (_, index) => store.upsertFile({
@@ -107,14 +104,14 @@ test('JsonStore serializes concurrent saves without tmp-file races', async () =>
     size: index
   })));
 
-  const reloaded = new JsonStore(dir);
+  const reloaded = new SqliteStore(dir);
   await reloaded.init();
   assert.equal((await reloaded.listFiles()).length, 50);
 });
 
-test('JsonStore prunes and clears events using log retention config', async () => {
+test('SqliteStore prunes and clears events using log retention config', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-events-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     sync: { logRetentionDays: 0, logRetentionCount: 2 }
@@ -129,17 +126,29 @@ test('JsonStore prunes and clears events using log retention config', async () =
   assert.deepEqual(await store.listEvents(), []);
 });
 
-test('JsonStore prunes events older than the configured retention days', async () => {
+test('SqliteStore prunes events older than the configured retention days', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-event-age-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     sync: { logRetentionDays: 1, logRetentionCount: 0 }
   });
-  store.state.events = [
-    { type: 'upload_succeeded', subject: 'docs/new.txt', message: '', at: new Date().toISOString() },
-    { type: 'upload_succeeded', subject: 'docs/old.txt', message: '', at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }
-  ];
+  const newEvent = { type: 'upload_succeeded', subject: 'docs/new.txt', message: '', at: new Date().toISOString() };
+  const oldEvent = { type: 'upload_succeeded', subject: 'docs/old.txt', message: '', at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() };
+  store.db.prepare('INSERT INTO events (type, subject, message, at, data) VALUES (?, ?, ?, ?, ?)').run(
+    newEvent.type,
+    newEvent.subject,
+    newEvent.message,
+    newEvent.at,
+    JSON.stringify(newEvent)
+  );
+  store.db.prepare('INSERT INTO events (type, subject, message, at, data) VALUES (?, ?, ?, ?, ?)').run(
+    oldEvent.type,
+    oldEvent.subject,
+    oldEvent.message,
+    oldEvent.at,
+    JSON.stringify(oldEvent)
+  );
 
   assert.equal(await store.pruneEvents(), 1);
   assert.deepEqual((await store.listEvents()).map((event) => event.subject), ['docs/new.txt']);

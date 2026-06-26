@@ -1,12 +1,12 @@
 import { normalizeConfig } from './config/config.js';
-import { JsonStore } from './store/jsonStore.js';
+import { SqliteStore } from './store/sqliteStore.js';
 import { SyncEngine } from './sync/engine.js';
 import { createApp, listen } from './web/server.js';
 
 const dataDir = process.env.DATA_DIR || '/data';
 const portOverride = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : null;
 
-const store = new JsonStore(dataDir);
+const store = new SqliteStore(dataDir);
 await store.init();
 
 let config = normalizeConfig(await store.loadConfig() ?? {});

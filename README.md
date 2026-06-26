@@ -13,8 +13,9 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Task queue execution: each task scans and uploads before the next task starts.
 - Per-task scheduling: manual, interval, daily, and weekly schedules are supported.
 - Scheduled runs drain a local filesystem watcher queue instead of rescanning every task directory.
-- Manual scans still perform full local and pCloud reconciliation when you need to rebuild or verify state.
+- Manual scans reconcile with pCloud on the first scan or when the task path changes, then use local SQLite state for repeated unchanged scans.
 - Filterable file-level sync logs with file size, status, and active upload progress.
+- SQLite runtime state for config, file records, and sync logs.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
 - Active sync runs can be stopped from the web UI; stopped uploads return to the pending queue.
@@ -35,7 +36,7 @@ This app uses pCloud OAuth 2.0. The repository does not include any Client ID, C
 6. In the app UI, enter the Client ID, Client Secret, and authorization code, then click the token exchange button.
 7. If pCloud returns a data-center hostname, the app saves and uses that official API host, such as `api.pcloud.com`, `eapi.pcloud.com`, or a regional pCloud API host.
 
-Do not commit Client Secrets, authorization codes, access tokens, `state.json`, or `.env` files to a public repository. Common runtime state and package artifacts are ignored by `.gitignore`.
+Do not commit Client Secrets, authorization codes, access tokens, `state.sqlite`, legacy `state.json`, or `.env` files to a public repository. Common runtime state and package artifacts are ignored by `.gitignore`.
 
 See [SECURITY.md](SECURITY.md) for public-repository safety notes.
 
@@ -107,6 +108,8 @@ node --test
 DATA_DIR="$(pwd)/.data" PORT=17880 node src/index.js
 ```
 
+Runtime state is stored in `state.sqlite` inside `DATA_DIR`. v0.3.0 starts fresh and does not import legacy `state.json` data.
+
 ## Packaging
 
 Run this from the app root:
@@ -119,14 +122,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.12 is one-way upload only, not two-way sync.
-- v0.2.12 does not propagate local deletions to pCloud.
+- v0.3.0 is one-way upload only, not two-way sync.
+- v0.3.0 does not propagate local deletions to pCloud.
+- v0.3.0 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use cached file state when the task path has not changed.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.3.0: Replaces JSON runtime state with a fresh SQLite state database. New installs use `/data/state.sqlite` for config, file records, and logs; legacy `state.json` is not imported, so deleting app data starts from a clean state. Requires Node.js 22.5 or newer for `node:sqlite`.
 - v0.2.12: Optimizes repeated cached scans for large folders. Cached scans now batch file-state replacement per task instead of rewriting `state.json` once per unchanged file, so large repeated scans avoid both recursive pCloud listing and thousands of full JSON writes.
 - v0.2.11: Refines sync task card states and repeated scan caching. New tasks now show Not Scanned instead of Completed, full reconciliation shows Scanning, upload/queue work shows Syncing, and Completed is only shown after the task has file state with no pending work. Repeated scans now reuse cached synced/existing file state when the task path has not changed, avoiding another recursive pCloud listing after a successful sync.
 - v0.2.10: Fixes task schedule field visibility in Settings. The UI now enforces the HTML `hidden` attribute in CSS so interval, daily, weekly, and manual schedules actually hide fields that do not apply. Manual scans with no enabled tasks now show a no-task message instead of saying the scan was triggered.

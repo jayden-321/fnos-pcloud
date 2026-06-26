@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeConfig } from '../src/config/config.js';
-import { JsonStore } from '../src/store/jsonStore.js';
+import { SqliteStore } from '../src/store/sqliteStore.js';
 import { SyncEngine } from '../src/sync/engine.js';
 
 test('SyncEngine scans configured sources and queues files when pCloud token is missing', async () => {
@@ -12,7 +12,7 @@ test('SyncEngine scans configured sources and queues files when pCloud token is 
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
   await writeFile(path.join(sourceDir, 'a.txt'), 'hello');
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     sources: [{ id: 'docs', path: sourceDir, enabled: true, remoteName: 'Docs' }]
@@ -33,7 +33,7 @@ test('SyncEngine uploads pending files and records pCloud file ids', async () =>
   await writeFile(path.join(sourceDir, 'a.txt'), 'hello');
   const calls = [];
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -74,7 +74,7 @@ test('SyncEngine uses cached file state on repeated scans instead of relisting r
   let remoteScans = 0;
   let uploads = 0;
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -118,7 +118,7 @@ test('SyncEngine preserves cached existing files when a repeated scan skips remo
   await writeFile(filePath, 'hello');
   const info = await stat(filePath);
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -170,7 +170,7 @@ test('SyncEngine batches cached scan state writes instead of upserting each unch
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
   const files = ['a.txt', 'b.txt'];
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -229,7 +229,7 @@ test('SyncEngine runs task scan and upload jobs sequentially by task', async () 
   await writeFile(path.join(secondDir, 'b.txt'), 'second');
   const calls = [];
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -278,7 +278,7 @@ test('SyncEngine runs task scan and upload jobs sequentially by task', async () 
 
 test('SyncEngine skips manual scans when there are no enabled tasks and clears stale file state', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({ tasks: [] }));
   await store.upsertFile({
@@ -305,7 +305,7 @@ test('SyncEngine scheduled runner drains due task queues without a full scan', a
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
   const filePath = path.join(sourceDir, 'queued.txt');
   await writeFile(filePath, 'queued');
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -358,7 +358,7 @@ test('SyncEngine turns queued local file changes into pending scheduled uploads'
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
   const filePath = path.join(sourceDir, 'new.txt');
   await writeFile(filePath, 'new file');
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -399,7 +399,7 @@ test('SyncEngine limits scheduled full-scan fallback to watcher-unavailable task
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
   const filePath = path.join(sourceDir, 'queued.txt');
   await writeFile(filePath, 'queued');
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -453,7 +453,7 @@ test('SyncEngine recovers stale uploading files on the next scan', async () => {
   await writeFile(filePath, 'hello');
   let uploads = 0;
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -500,7 +500,7 @@ test('SyncEngine processes stale uploading files when draining the queue directl
   const info = await stat(filePath);
   let uploads = 0;
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -545,7 +545,7 @@ test('SyncEngine uploads to the task pCloud folder without prefixing the default
   await writeFile(filePath, 'hello');
   const folders = [];
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS-Backup' },
@@ -586,7 +586,7 @@ test('SyncEngine stop request aborts active upload and requeues the file', async
   const filePath = path.join(sourceDir, 'stop.txt');
   await writeFile(filePath, 'hello');
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -635,7 +635,7 @@ test('SyncEngine exposes aggregate upload speed while uploads are active', async
   const filePath = path.join(sourceDir, 'speed.txt');
   await writeFile(filePath, 'hello');
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -741,7 +741,7 @@ test('SyncEngine uses pCloud API server selection before uploading', async () =>
   const filePath = path.join(sourceDir, 'server.txt');
   await writeFile(filePath, 'hello');
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -802,7 +802,7 @@ test('SyncEngine retry action also requeues stale uploading files', async () => 
   const filePath = path.join(sourceDir, 'retry.txt');
   await writeFile(filePath, 'hello');
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -834,7 +834,7 @@ test('SyncEngine skips files already present in the remote directory', async () 
   const info = await stat(filePath);
   let uploads = 0;
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },
@@ -875,7 +875,7 @@ test('SyncEngine clears stale file state before rebuilding a scan from current t
   await writeFile(filePath, 'fresh');
   const info = await stat(filePath);
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -950,7 +950,7 @@ test('SyncEngine keeps previous scan metadata for same-size change detection whi
   const previousMtimeMs = Math.trunc(info.mtimeMs) - 60000;
   let uploads = 0;
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token' },
@@ -1000,7 +1000,7 @@ test('SyncEngine ignores old dashed state and uploads to the normalized source d
   const oldInfo = await stat(filePath);
   const uploads = [];
 
-  const store = new JsonStore(dataDir);
+  const store = new SqliteStore(dataDir);
   await store.init();
   await store.saveConfig(normalizeConfig({
     pcloud: { accessToken: 'token', remoteRoot: '/NAS' },

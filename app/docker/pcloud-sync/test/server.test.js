@@ -4,11 +4,11 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/web/server.js';
-import { JsonStore } from '../src/store/jsonStore.js';
+import { SqliteStore } from '../src/store/sqliteStore.js';
 
 test('HTTP API returns redacted config and aggregate status', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     port: 8080,
@@ -32,7 +32,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.2.12');
+  assert.equal(status.version, '0.3.0');
   assert.equal(status.stats.failed, 1);
   assert.equal(status.stats.existing, 1);
   assert.deepEqual(status.tasks, []);
@@ -45,7 +45,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
 test('HTTP API returns per-task stats and engine task queue state', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-task-stats-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     port: 8080,
@@ -86,7 +86,7 @@ test('HTTP API returns per-task stats and engine task queue state', async () => 
 
 test('HTTP API passes a requested task id to manual scans', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-scan-task-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   let scanOptions = null;
 
@@ -110,7 +110,7 @@ test('HTTP API passes a requested task id to manual scans', async () => {
 
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   let retried = false;
   let drained = false;
@@ -139,7 +139,7 @@ test('HTTP API drains the pending queue after retrying failed or stuck files', a
 
 test('HTTP API requests the engine to stop the active sync', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   let stopRequested = false;
 
@@ -161,7 +161,7 @@ test('HTTP API requests the engine to stop the active sync', async () => {
 
 test('HTTP API keeps saved token masks and allows deleting all tasks', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     port: 8080,
@@ -192,7 +192,7 @@ test('HTTP API keeps saved token masks and allows deleting all tasks', async () 
 
 test('HTTP API prunes and clears sync logs', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-events-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     port: 8080,
@@ -226,7 +226,7 @@ test('HTTP API lists local folders inside allowed roots only', async () => {
   await mkdir(path.join(root, '财务'));
   await mkdir(path.join(root, 'photos'));
   await writeFile(path.join(root, 'file.txt'), 'not a directory');
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
 
   const app = createApp({
@@ -246,7 +246,7 @@ test('HTTP API lists local folders inside allowed roots only', async () => {
 
 test('HTTP API lists and creates remote pCloud folders', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     port: 8080,
@@ -289,7 +289,7 @@ test('HTTP API lists and creates remote pCloud folders', async () => {
 
 test('HTTP API exposes pCloud progress, checksum, diff, and server APIs', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
-  const store = new JsonStore(dir);
+  const store = new SqliteStore(dir);
   await store.init();
   await store.saveConfig({
     port: 8080,
