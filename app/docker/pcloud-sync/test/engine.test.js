@@ -122,6 +122,30 @@ test('SyncEngine runs task scan and upload jobs sequentially by task', async () 
   assert.deepEqual(files.map((file) => file.sourceId).sort(), ['first', 'second']);
 });
 
+test('SyncEngine skips manual scans when there are no enabled tasks and clears stale file state', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({ tasks: [] }));
+  await store.upsertFile({
+    key: 'old/a.txt',
+    sourceId: 'old',
+    absolutePath: '/missing/a.txt',
+    relativePath: 'a.txt',
+    remotePath: '/old/a.txt',
+    size: 1,
+    status: 'pending'
+  });
+
+  const engine = new SyncEngine({ store });
+  const result = await engine.scanNow();
+  const events = await store.listEvents();
+
+  assert.deepEqual(result, { skipped: true, reason: 'no enabled tasks' });
+  assert.equal((await store.stats()).total, 0);
+  assert.equal(events.some((event) => event.type === 'scan_completed'), false);
+});
+
 test('SyncEngine scheduled runner drains due task queues without a full scan', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));

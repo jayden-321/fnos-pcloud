@@ -253,6 +253,11 @@ export class SyncEngine {
         .filter((item) => item.enabled)
         .filter((item) => requestedTaskIds.length === 0 || requestedTaskIds.includes(item.id));
       this.clearQueuedChangesForTasks(requestedTaskIds.length > 0 ? requestedTaskIds : null);
+      if (tasks.length === 0) {
+        await this.store.clearFiles(requestedTaskIds.length > 0 ? { sourceIds: requestedTaskIds } : {});
+        this.taskQueue = [];
+        return { skipped: true, reason: 'no enabled tasks' };
+      }
       await this.store.clearFiles(requestedTaskIds.length > 0 ? { sourceIds: requestedTaskIds } : {});
       const activeKeys = new Set();
       const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;

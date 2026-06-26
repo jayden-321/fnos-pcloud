@@ -53,9 +53,9 @@ document.querySelector('#createTask').addEventListener('click', () => {
 document.querySelector('#addTask').addEventListener('click', addTaskEditor);
 
 document.querySelector('#scanNow').addEventListener('click', async () => {
-  await post('/api/scan', {});
+  const scanResult = await post('/api/scan', {});
   await refreshStatus();
-  show('扫描已触发');
+  show(scanResult.skipped ? '没有可扫描的同步任务' : '扫描已触发');
 });
 
 document.querySelector('#stopSync').addEventListener('click', async () => {

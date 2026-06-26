@@ -119,14 +119,15 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.9 is one-way upload only, not two-way sync.
-- v0.2.9 does not propagate local deletions to pCloud.
+- v0.2.10 is one-way upload only, not two-way sync.
+- v0.2.10 does not propagate local deletions to pCloud.
 - Manual scans can still take time on very large folders because they intentionally reconcile the local tree with the pCloud destination.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.2.10: Fixes task schedule field visibility in Settings. The UI now enforces the HTML `hidden` attribute in CSS so interval, daily, weekly, and manual schedules actually hide fields that do not apply. Manual scans with no enabled tasks now show a no-task message instead of saying the scan was triggered.
 - v0.2.9: Simplifies Settings and Sync Logs. The global scan interval field is removed from Sync Rules, each task schedule only shows fields that apply to the selected mode, and the separate Event column is removed from Sync Logs.
 - v0.2.8: Changes scheduled runs to drain a local filesystem watcher queue instead of rescanning every task directory. Manual scans still perform full local and pCloud reconciliation, startup no longer triggers an automatic full scan, and watcher-unavailable tasks fall back to full scans with a `watch_failed` log event.
 - v0.2.7: Adds task-queue execution so one task scans and uploads before the next task starts. The dashboard shows current-task metrics while a task is running, task cards show per-task counts, and each task can run manually, by interval, daily, or weekly.

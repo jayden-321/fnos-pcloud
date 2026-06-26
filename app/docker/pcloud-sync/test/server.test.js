@@ -32,7 +32,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.2.9');
+  assert.equal(status.version, '0.2.10');
   assert.equal(status.stats.failed, 1);
   assert.equal(status.stats.existing, 1);
   assert.deepEqual(status.tasks, []);

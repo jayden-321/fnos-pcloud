@@ -76,10 +76,19 @@ test('web UI exposes current-task metrics and task schedule controls', async () 
   assert.match(script, /每周/);
 });
 
+test('manual scan button reports when there are no enabled sync tasks', async () => {
+  const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+
+  assert.match(script, /const scanResult = await post\('\/api\/scan', {}\)/);
+  assert.match(script, /scanResult\.skipped/);
+  assert.match(script, /没有可扫描的同步任务/);
+});
+
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {
-  const [html, script] = await Promise.all([
+  const [html, script, styles] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
-    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
   ]);
 
   assert.doesNotMatch(html, /name="intervalSeconds"/);
@@ -92,6 +101,7 @@ test('task schedule form hides fields that do not apply to the selected schedule
   assert.match(script, /field\.hidden = fieldName === 'interval' \? type !== 'interval'/);
   assert.match(script, /fieldName === 'time' \? !\['daily', 'weekly'\]\.includes\(type\)/);
   assert.match(script, /type !== 'weekly'/);
+  assert.match(styles, /\[hidden\]\s*{\s*display:\s*none\s*!important;?\s*}/);
 });
 
 test('web UI exposes stop sync and opens pCloud picker from the selected folder or root', async () => {
