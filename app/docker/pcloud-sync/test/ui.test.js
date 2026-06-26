@@ -34,6 +34,23 @@ test('settings prioritizes task config and exposes log retention controls', asyn
   assert.match(html, /pCloud 官方文档未声明推荐并发/);
 });
 
+test('settings exposes official pCloud upload and checksum options', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /name="renameIfExists"/);
+  assert.match(html, /name="checksumMode"/);
+  assert.match(html, /name="checksumSamplePercent"/);
+  assert.match(html, /失败后校验/);
+  assert.match(html, /抽样校验/);
+  assert.match(html, /全部校验/);
+  assert.match(script, /renameIfExists/);
+  assert.match(script, /checksumMode/);
+  assert.match(script, /checksumSamplePercent/);
+});
+
 test('sync logs expose file size, progress, and uploading status filters', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -77,11 +94,25 @@ test('web UI exposes current-task metrics and task schedule controls', async () 
 });
 
 test('manual scan button reports when there are no enabled sync tasks', async () => {
-  const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
 
-  assert.match(script, /const scanResult = await post\('\/api\/scan', {}\)/);
+  assert.match(html, /id="forceRemoteScan"/);
+  assert.match(script, /runScan\(\{ forceRemoteScan: false }\)/);
+  assert.match(script, /runScan\(\{ forceRemoteScan: true }\)/);
   assert.match(script, /scanResult\.skipped/);
   assert.match(script, /没有可扫描的同步任务/);
+});
+
+test('task cards show scan source labels from engine queue state', async () => {
+  const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+
+  assert.match(script, /scanModeText/);
+  assert.match(script, /远端全量比对/);
+  assert.match(script, /本地缓存/);
+  assert.match(script, /扫描依据/);
 });
 
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {

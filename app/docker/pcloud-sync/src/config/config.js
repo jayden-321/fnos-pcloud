@@ -12,7 +12,10 @@ const DEFAULT_CONFIG = {
     concurrency: 2,
     ignorePatterns: ['.DS_Store', 'Thumbs.db', '*.tmp', '*.part', '~$*'],
     logRetentionDays: 30,
-    logRetentionCount: 300
+    logRetentionCount: 300,
+    renameIfExists: false,
+    checksumMode: 'failed',
+    checksumSamplePercent: 5
   },
   tasks: [],
   sources: []
@@ -77,8 +80,16 @@ function normalizeSync(input) {
     concurrency: clampInteger(input.concurrency, DEFAULT_CONFIG.sync.concurrency, 1, 8),
     logRetentionDays: clampInteger(input.logRetentionDays, DEFAULT_CONFIG.sync.logRetentionDays, 0, 3650),
     logRetentionCount: clampInteger(input.logRetentionCount, DEFAULT_CONFIG.sync.logRetentionCount, 0, 10000),
+    renameIfExists: input.renameIfExists === true,
+    checksumMode: normalizeChecksumMode(input.checksumMode),
+    checksumSamplePercent: clampInteger(input.checksumSamplePercent, DEFAULT_CONFIG.sync.checksumSamplePercent, 0, 100),
     ignorePatterns: normalizeIgnorePatterns(input.ignorePatterns ?? DEFAULT_CONFIG.sync.ignorePatterns)
   };
+}
+
+function normalizeChecksumMode(value) {
+  const mode = String(value || DEFAULT_CONFIG.sync.checksumMode).trim();
+  return ['off', 'failed', 'sample', 'all'].includes(mode) ? mode : DEFAULT_CONFIG.sync.checksumMode;
 }
 
 function normalizeSources(input) {

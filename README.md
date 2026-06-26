@@ -1,6 +1,6 @@
 # pCloud NAS Sync
 
-fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. It supports multiple one-way upload tasks, local and remote folder pickers, pCloud API based remote scanning, retry handling, detailed sync logs, and upload progress. The project is designed for personal self-hosted NAS backup and does not include any bundled pCloud credentials, user IDs, secrets, or tokens.
+fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. It supports multiple one-way upload tasks, local and remote folder pickers, pCloud API based remote scanning, pCloud diff cursors, retry handling, detailed sync logs, and upload progress. The project is designed for personal self-hosted NAS backup and does not include any bundled pCloud credentials, user IDs, secrets, or tokens.
 
 ## Features
 
@@ -13,8 +13,12 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Task queue execution: each task scans and uploads before the next task starts.
 - Per-task scheduling: manual, interval, daily, and weekly schedules are supported.
 - Scheduled runs drain a local filesystem watcher queue instead of rescanning every task directory.
-- Manual scans reconcile with pCloud on the first scan or when the task path changes, then use local SQLite state for repeated unchanged scans.
+- Manual scans reconcile with pCloud on the first scan or when the task path changes, then use pCloud `diff` plus local SQLite state for repeated unchanged scans.
+- Task cards show the last scan source: full pCloud comparison, local cache, or pCloud diff.
+- pCloud `folderid`, `fileid`, task `diffid`, and last scan metadata are stored in SQLite to reduce path-only decisions.
 - Filterable file-level sync logs with file size, status, and active upload progress.
+- Optional pCloud upload conflict renaming through `uploadfile` `renameifexists`.
+- Optional upload verification through `checksumfile`: off, failed-upload verification, sampled verification, or all uploads.
 - SQLite runtime state for config, file records, and sync logs.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
@@ -47,11 +51,12 @@ The sync logic uses the official pCloud HTTP/JSON API:
 - OAuth: `oauth2_token`
 - Account connectivity: `userinfo`
 - Remote browsing and comparison: `listfolder`
+- Remote metadata: `stat`
 - Remote folder creation: `createfolderifnotexists`
 - Uploads: `uploadfile`
 - Upload server selection: `getapiserver`, `currentserver`
 - Upload progress and speed: `uploadprogress` plus the `progresshash` parameter on `uploadfile`
-- Remote verification and future incremental features: `checksumfile`, `diff`
+- Remote verification and incremental remote-change checks: `checksumfile`, `diff`
 
 The local folder picker reads NAS paths that are mounted into the Docker container. pCloud does not provide an API for local NAS filesystem browsing. Remote folder browsing, remote folder creation, uploads, progress, and verification-related features are implemented through pCloud APIs.
 
@@ -108,7 +113,7 @@ node --test
 DATA_DIR="$(pwd)/.data" PORT=17880 node src/index.js
 ```
 
-Runtime state is stored in `state.sqlite` inside `DATA_DIR`. v0.3.0 starts fresh and does not import legacy `state.json` data.
+Runtime state is stored in `state.sqlite` inside `DATA_DIR`. v0.3.x starts fresh and does not import legacy `state.json` data.
 
 ## Packaging
 
@@ -122,15 +127,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.3.0 is one-way upload only, not two-way sync.
-- v0.3.0 does not propagate local deletions to pCloud.
-- v0.3.0 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
-- First scans and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use cached file state when the task path has not changed.
+- v0.3.1 is one-way upload only, not two-way sync.
+- v0.3.1 does not propagate local deletions to pCloud.
+- v0.3.1 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.3.1: Adds pCloud API based scan transparency and upload hardening in one package. Task cards now retain the last scan source after refresh, scans can use pCloud `diff` cursors before trusting local cache, remote task state stores folder IDs, file IDs, and diff IDs, `uploadfile` can optionally pass `renameifexists`, selected upload server failures fall back to the configured API host, and optional `checksumfile` verification supports failed, sampled, or all uploads.
 - v0.3.0: Replaces JSON runtime state with a fresh SQLite state database. New installs use `/data/state.sqlite` for config, file records, and logs; legacy `state.json` is not imported, so deleting app data starts from a clean state. Requires Node.js 22.5 or newer for `node:sqlite`.
 - v0.2.12: Optimizes repeated cached scans for large folders. Cached scans now batch file-state replacement per task instead of rewriting `state.json` once per unchanged file, so large repeated scans avoid both recursive pCloud listing and thousands of full JSON writes.
 - v0.2.11: Refines sync task card states and repeated scan caching. New tasks now show Not Scanned instead of Completed, full reconciliation shows Scanning, upload/queue work shows Syncing, and Completed is only shown after the task has file state with no pending work. Repeated scans now reuse cached synced/existing file state when the task path has not changed, avoiding another recursive pCloud listing after a successful sync.

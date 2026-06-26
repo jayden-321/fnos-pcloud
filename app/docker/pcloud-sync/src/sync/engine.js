@@ -1,4 +1,5 @@
-import { watch } from 'node:fs';
+import { createReadStream, watch } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeConfig } from '../config/config.js';
@@ -281,7 +282,8 @@ export class SyncEngine {
         queued: 0,
         uploaded: 0,
         failed: 0,
-        stopped: 0
+        stopped: 0,
+        scanMode: ''
       }));
 
       for (const source of tasks) {
@@ -311,16 +313,44 @@ export class SyncEngine {
           continue;
         }
 
+        const previousRemoteState = await this.store.getTaskRemoteState?.(source.id) ?? {};
         let remoteFiles = null;
+        let remoteFolder = null;
+        let nextDiffid = Number(previousRemoteState.diffid || 0) || null;
         const needsRemoteListing = shouldListRemoteFiles({
           source,
           discovered,
           known,
           force: options.forceRemoteScan === true
         });
-        if (client?.listRemoteFiles && needsRemoteListing) {
+        let scanMode = needsRemoteListing ? 'remote_full' : '';
+        let diffTouchedTask = false;
+
+        if (client?.diff && !needsRemoteListing) {
           try {
-            remoteFiles = await client.listRemoteFiles(source.remotePath);
+            const diff = await client.diff(nextDiffid ? { diffid: nextDiffid, limit: 1000 } : { last: 0 });
+            scanMode = 'remote_diff';
+            nextDiffid = Number(diff.diffid || nextDiffid || 0) || null;
+            diffTouchedTask = diffTouchesTask(diff.entries ?? [], source, previousRemoteState, known);
+          } catch (error) {
+            await this.store.addEvent('remote_diff_failed', source.name, error.message);
+            scanMode = 'cache';
+          }
+        }
+
+        if (!scanMode) {
+          scanMode = 'cache';
+        }
+
+        if (client && (needsRemoteListing || diffTouchedTask)) {
+          try {
+            const remoteTree = await listRemoteTree(client, source.remotePath);
+            remoteFiles = remoteTree.files;
+            remoteFolder = remoteTree.folder;
+            if (client.diff && !nextDiffid) {
+              const diff = await client.diff({ last: 0 });
+              nextDiffid = Number(diff.diffid || 0) || null;
+            }
           } catch (error) {
             await this.store.addEvent('remote_scan_failed', source.name, error.message);
             result.failed += 1;
@@ -351,7 +381,8 @@ export class SyncEngine {
           discovered: discovered.length,
           remoteFiles: remoteFiles?.size ?? 0,
           queued: plan.pending.length,
-          existing: existingCount
+          existing: existingCount,
+          scanMode
         });
 
         const plannedFiles = [];
@@ -369,6 +400,14 @@ export class SyncEngine {
           plannedFiles.push(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles)));
         }
         await this.store.replaceFilesForSources([source.id], plannedFiles);
+        await this.store.setTaskRemoteState?.(source.id, {
+          remotePath: source.remotePath,
+          remoteFolderId: remoteFolder?.folderid ?? previousRemoteState.remoteFolderId ?? null,
+          diffid: nextDiffid ?? previousRemoteState.diffid ?? null,
+          lastScanMode: scanMode,
+          lastScanAt: new Date().toISOString(),
+          lastFullRemoteScanAt: remoteFiles ? new Date().toISOString() : previousRemoteState.lastFullRemoteScanAt
+        });
 
         if (config.pcloud.accessToken && !this.stopRequested) {
           Object.assign(taskResult, {
@@ -399,7 +438,8 @@ export class SyncEngine {
       }
 
       this.lastRunAt = new Date().toISOString();
-      await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.remoteFiles} remote, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed`);
+      const scanModes = result.taskResults.map((task) => `${task.name}:${task.scanMode || 'unknown'}`).join(', ');
+      await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.remoteFiles} remote, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed; scanMode ${scanModes}`);
       return result;
     } catch (error) {
       this.lastError = error.message;
@@ -547,7 +587,8 @@ export class SyncEngine {
     const pending = await this.store.listFiles({ ...filter, status: 'pending' });
     const uploading = await this.store.listFiles({ ...filter, status: 'uploading' });
     const processable = dedupeByKey([...pending, ...uploading]);
-    const client = await this.prepareUploadClient(this.pcloudFactory(normalized));
+    const baseClient = this.pcloudFactory(normalized);
+    const client = await this.prepareUploadClient(baseClient);
     let uploaded = 0;
     let failed = 0;
     let stopped = 0;
@@ -570,31 +611,25 @@ export class SyncEngine {
           updatedAt: Date.now(),
           controller
         });
-        const progressHash = progressHashForFile(file);
-        const stopProgressPolling = this.startUploadProgressPolling(client, file.key, progressHash);
-        const remoteFolder = remoteFolderForFile(normalized, file);
-        const folder = await client.ensureFolder(remoteFolder);
-        let response;
-        try {
-          response = await client.uploadFile({
-            filePath: file.absolutePath,
-            filename: path.posix.basename(file.relativePath),
-            folderid: folder.folderid,
-            mtime: file.mtime,
-            progressHash,
-            signal: controller.signal
-          });
-        } finally {
-          stopProgressPolling();
-        }
-        const pcloudPath = joinRemote(remoteFolder, path.posix.basename(file.relativePath));
+        const upload = await this.uploadFileWithFallback({
+          config: normalized,
+          file,
+          primaryClient: client,
+          fallbackClient: baseClient,
+          controller
+        });
+        const verification = await this.verifySuccessfulUpload(upload.client, file, upload, normalized.sync);
         await this.store.setStatus(file.key, 'synced', {
           error: '',
-          pcloudFileId: response.fileids?.[0] ?? response.metadata?.[0]?.fileid ?? null,
-          pcloudPath,
+          pcloudFileId: upload.pcloudFileId,
+          pcloudFolderId: upload.folder?.folderid ?? null,
+          pcloudPath: upload.pcloudPath,
+          pcloudHash: upload.metadata?.hash === undefined || upload.metadata?.hash === null ? '' : String(upload.metadata.hash),
+          checksumSha1: verification?.sha1 ?? '',
+          checksumVerifiedAt: verification?.verifiedAt ?? '',
           syncedAt: new Date().toISOString()
         });
-        await this.store.addEvent('upload_succeeded', file.key, pcloudPath, { size: Number(file.size || 0) });
+        await this.store.addEvent('upload_succeeded', file.key, upload.pcloudPath, { size: Number(file.size || 0) });
         uploaded += 1;
       } catch (error) {
         if (this.stopRequested || isStopError(error)) {
@@ -603,6 +638,21 @@ export class SyncEngine {
           });
           await this.store.addEvent('upload_stopped', file.key, 'Stopped', { size: Number(file.size || 0) });
           stopped += 1;
+          return;
+        }
+        const verified = await this.verifyAfterUploadError(client, file, normalized.sync).catch(() => null);
+        if (verified) {
+          await this.store.setStatus(file.key, 'synced', {
+            error: '',
+            pcloudFileId: verified.pcloudFileId,
+            pcloudFolderId: verified.pcloudFolderId,
+            pcloudPath: verified.pcloudPath,
+            checksumSha1: verified.sha1,
+            checksumVerifiedAt: verified.verifiedAt,
+            syncedAt: new Date().toISOString()
+          });
+          await this.store.addEvent('upload_verified_after_error', file.key, verified.pcloudPath, { size: Number(file.size || 0) });
+          uploaded += 1;
           return;
         }
         await this.store.setStatus(file.key, 'failed', {
@@ -617,6 +667,93 @@ export class SyncEngine {
     });
 
     return { uploaded, failed, stopped };
+  }
+
+  async uploadFileWithFallback({ config, file, primaryClient, fallbackClient, controller }) {
+    try {
+      return await this.uploadFileOnce({ config, file, client: primaryClient, controller });
+    } catch (error) {
+      if (!fallbackClient || fallbackClient === primaryClient || !isTransientUploadError(error)) {
+        throw error;
+      }
+      await this.store.addEvent('server_fallback', file.key, error.message, { size: Number(file.size || 0) });
+      return this.uploadFileOnce({ config, file, client: fallbackClient, controller });
+    }
+  }
+
+  async uploadFileOnce({ config, file, client, controller }) {
+    const progressHash = progressHashForFile(file);
+    const remoteFolder = remoteFolderForFile(config, file);
+    const folder = await client.ensureFolder(remoteFolder);
+    const stopProgressPolling = this.startUploadProgressPolling(client, file.key, progressHash);
+    let response;
+    try {
+      response = await client.uploadFile({
+        filePath: file.absolutePath,
+        filename: path.posix.basename(file.relativePath),
+        folderid: folder.folderid,
+        mtime: file.mtime,
+        progressHash,
+        renameIfExists: config.sync.renameIfExists,
+        signal: controller.signal
+      });
+    } finally {
+      stopProgressPolling();
+    }
+    const metadata = uploadMetadata(response);
+    const pcloudFileId = response.fileids?.[0] ?? metadata?.fileid ?? null;
+    const pcloudPath = metadata?.path || joinRemote(remoteFolder, path.posix.basename(file.relativePath));
+    return { client, response, metadata, folder, pcloudFileId, pcloudPath };
+  }
+
+  async verifySuccessfulUpload(client, file, upload, sync) {
+    if (!shouldVerifySuccessfulUpload(file, sync)) {
+      return null;
+    }
+    return this.verifyRemoteFileChecksum(client, file, {
+      fileid: upload.pcloudFileId,
+      path: upload.pcloudPath
+    });
+  }
+
+  async verifyAfterUploadError(client, file, sync) {
+    if (sync.checksumMode !== 'failed' || !client?.stat || !client?.checksumFile) {
+      return null;
+    }
+    const pcloudPath = file.remotePath;
+    const statResult = await client.stat({ fileid: file.pcloudFileId, path: file.pcloudFileId ? '' : pcloudPath });
+    const metadata = statResult.metadata ?? {};
+    if (Number(metadata.size || 0) !== Number(file.size || 0)) {
+      return null;
+    }
+    const verified = await this.verifyRemoteFileChecksum(client, file, {
+      fileid: metadata.fileid,
+      path: metadata.fileid ? '' : pcloudPath
+    });
+    return {
+      ...verified,
+      pcloudFileId: metadata.fileid ?? file.pcloudFileId ?? null,
+      pcloudFolderId: metadata.parentfolderid ?? null,
+      pcloudPath: metadata.path || pcloudPath
+    };
+  }
+
+  async verifyRemoteFileChecksum(client, file, target) {
+    if (!client?.checksumFile) {
+      return null;
+    }
+    const [localSha1, remote] = await Promise.all([
+      sha1File(file.absolutePath),
+      client.checksumFile(target)
+    ]);
+    if (remote.sha1 && String(remote.sha1).toLowerCase() !== localSha1) {
+      throw new Error('pCloud checksum verification failed');
+    }
+    return {
+      sha1: remote.sha1 ? String(remote.sha1).toLowerCase() : localSha1,
+      verifiedAt: new Date().toISOString(),
+      metadata: remote.metadata ?? null
+    };
   }
 
   recordUploadProgress(key, chunkBytes, totalBytes = 0) {
@@ -759,6 +896,40 @@ function shouldListRemoteFiles({ source, discovered, known, force = false }) {
   });
 }
 
+async function listRemoteTree(client, remotePath) {
+  if (client.listRemoteTree) {
+    return client.listRemoteTree(remotePath);
+  }
+  if (client.listRemoteFiles) {
+    return { folder: null, files: await client.listRemoteFiles(remotePath) };
+  }
+  return { folder: null, files: new Map() };
+}
+
+function diffTouchesTask(entries, source, remoteState, known) {
+  const remotePath = joinRemote(source.remotePath);
+  const remoteFolderId = Number(remoteState.remoteFolderId || 0);
+  const knownFileIds = new Set(
+    knownFilesForTask(known, source.id)
+      .map((file) => Number(file.pcloudFileId || 0))
+      .filter(Boolean)
+  );
+
+  return entries.some((entry) => {
+    const metadata = entry?.metadata ?? {};
+    const pathValue = metadata.path ? joinRemote(metadata.path) : '';
+    if (pathValue && (pathValue === remotePath || pathValue.startsWith(`${remotePath}/`))) {
+      return true;
+    }
+    const parentFolderId = Number(metadata.parentfolderid || metadata.folderid || 0);
+    if (remoteFolderId && parentFolderId === remoteFolderId) {
+      return true;
+    }
+    const fileId = Number(metadata.fileid || 0);
+    return Boolean(fileId && knownFileIds.has(fileId));
+  });
+}
+
 function knownFilesForTask(known, taskId) {
   return [...known.entries()]
     .filter(([key, file]) => file?.sourceId === taskId || String(key).startsWith(`${taskId}/`))
@@ -773,7 +944,9 @@ function cachedUnchangedFile(source, file, existing, remoteListed) {
       error: '',
       retryCount: existing.retryCount ?? 0,
       pcloudFileId: file.remote?.fileid ?? existing.pcloudFileId ?? null,
+      pcloudFolderId: file.remote?.parentfolderid ?? existing.pcloudFolderId ?? null,
       pcloudPath: joinRemote(source.remotePath, file.relativePath),
+      pcloudHash: file.remote?.hash ?? existing.pcloudHash ?? '',
       existingAt: new Date().toISOString()
     };
   }
@@ -786,6 +959,8 @@ function cachedUnchangedFile(source, file, existing, remoteListed) {
     error: '',
     retryCount: existing.retryCount ?? 0,
     pcloudFileId: existing.pcloudFileId ?? null,
+    pcloudFolderId: existing.pcloudFolderId ?? null,
+    pcloudHash: existing.pcloudHash ?? '',
     pcloudPath: existing.pcloudPath ?? joinRemote(source.remotePath, file.relativePath)
   };
 }
@@ -914,6 +1089,45 @@ function dedupeByKey(files) {
 
 function progressHashForFile(file) {
   return `pcloud-nas-sync-${Buffer.from(file.key).toString('base64url').slice(0, 80)}-${Date.now()}`;
+}
+
+function uploadMetadata(response) {
+  const metadata = response?.metadata;
+  return Array.isArray(metadata) ? metadata[0] ?? null : metadata ?? null;
+}
+
+function shouldVerifySuccessfulUpload(file, sync) {
+  if (sync.checksumMode === 'all') {
+    return true;
+  }
+  if (sync.checksumMode === 'sample') {
+    return stablePercent(file.key) < Number(sync.checksumSamplePercent || 0);
+  }
+  return false;
+}
+
+function stablePercent(value) {
+  const hash = createHash('sha1').update(String(value || '')).digest();
+  return hash[0] % 100;
+}
+
+async function sha1File(filePath) {
+  const hash = createHash('sha1');
+  await new Promise((resolve, reject) => {
+    const stream = createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  return hash.digest('hex');
+}
+
+function isTransientUploadError(error) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNABORTED'].includes(code)
+    || message.includes('socket hang up')
+    || message.includes('network');
 }
 
 function firstApiHostname(response) {

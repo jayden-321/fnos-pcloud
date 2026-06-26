@@ -1,4 +1,4 @@
-const FILE_LOG_EVENT_TYPES = new Set(['upload_succeeded', 'upload_failed']);
+const FILE_LOG_EVENT_TYPES = new Set(['upload_succeeded', 'upload_verified_after_error', 'upload_failed']);
 
 export function fileLogEvents(events = []) {
   return events.filter((event) => FILE_LOG_EVENT_TYPES.has(event?.type));
@@ -42,6 +42,7 @@ export function uploadToLogRow(file, activeUpload = {}) {
 function eventMeta(type) {
   const map = {
     upload_succeeded: { status: 'success', statusText: '成功', eventText: '上传' },
+    upload_verified_after_error: { status: 'success', statusText: '成功', eventText: '校验' },
     upload_failed: { status: 'failed', statusText: '失败', eventText: '上传' }
   };
   return map[type] || { status: 'queued', statusText: '待处理', eventText: type || '事件' };

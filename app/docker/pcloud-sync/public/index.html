@@ -24,6 +24,7 @@
         </div>
         <div class="actions">
           <button id="scanNow" type="button">立即扫描</button>
+          <button id="forceRemoteScan" type="button">远端重新比对</button>
           <button id="stopSync" type="button" disabled>停止同步</button>
           <button id="retryFailed" type="button">重试失败</button>
         </div>
@@ -139,6 +140,25 @@
               并发上传数
               <input name="concurrency" type="number" min="1" max="8">
               <small class="field-note">pCloud 官方文档未声明推荐并发；建议 1-4，最高 8。</small>
+            </label>
+            <label class="inline-check">
+              <input name="renameIfExists" type="checkbox">
+              文件名冲突时让 pCloud 自动重命名
+            </label>
+            <label>
+              上传后校验
+              <select name="checksumMode">
+                <option value="off">不校验</option>
+                <option value="failed">失败后校验</option>
+                <option value="sample">抽样校验</option>
+                <option value="all">全部校验</option>
+              </select>
+              <small class="field-note">默认不做全量校验；校验会调用 pCloud checksumfile，文件多时会更慢。</small>
+            </label>
+            <label>
+              抽样校验比例
+              <input name="checksumSamplePercent" type="number" min="0" max="100" step="1">
+              <small class="field-note">仅“抽样校验”使用。</small>
             </label>
             <div class="two">
               <label>

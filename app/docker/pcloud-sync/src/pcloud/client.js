@@ -73,6 +73,10 @@ export class PCloudClient {
   }
 
   async listRemoteFiles(remotePath) {
+    return (await this.listRemoteTree(remotePath)).files;
+  }
+
+  async listRemoteTree(remotePath) {
     const normalized = normalizeRemotePath(remotePath);
     let response;
     try {
@@ -83,14 +87,17 @@ export class PCloudClient {
       });
     } catch (error) {
       if (error.result === 2005 || /does not exist/i.test(error.message)) {
-        return new Map();
+        return { folder: null, files: new Map() };
       }
       throw error;
     }
 
     const files = new Map();
     collectRemoteFiles(response.metadata, '', files);
-    return files;
+    return {
+      folder: folderMetadata(response.metadata, normalized),
+      files
+    };
   }
 
   async listRemoteFolders(remotePath = '/') {
@@ -130,11 +137,15 @@ export class PCloudClient {
     return this.requestJson('checksumfile', { fileid, path: filePath });
   }
 
+  async stat({ fileid = null, path: filePath = '' } = {}) {
+    return this.requestJson('stat', { fileid, path: filePath });
+  }
+
   async diff(params = {}) {
     return this.requestJson('diff', params);
   }
 
-  async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, onProgress, signal }) {
+  async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, renameIfExists = false, onProgress, signal }) {
     const fields = {
       access_token: this.accessToken,
       nopartial: '1'
@@ -149,6 +160,9 @@ export class PCloudClient {
     }
     if (progressHash) {
       fields.progresshash = progressHash;
+    }
+    if (renameIfExists) {
+      fields.renameifexists = '1';
     }
     return this.multipartUpload('/uploadfile', fields, filePath, filename, onProgress, signal);
   }
@@ -332,9 +346,20 @@ function collectRemoteFiles(metadata, relativeDir, files) {
       mtime: parseRemoteMtime(item),
       mtimeMs: parseRemoteMtime(item) * 1000,
       hash: item.hash === undefined || item.hash === null ? '' : String(item.hash),
-      fileid: item.fileid ?? null
+      fileid: item.fileid ?? null,
+      parentfolderid: item.parentfolderid ?? metadata?.folderid ?? null
     });
   }
+}
+
+function folderMetadata(metadata, fallbackPath) {
+  if (!metadata) {
+    return null;
+  }
+  return {
+    folderid: metadata.folderid ?? null,
+    path: normalizeRemotePath(metadata.path || fallbackPath)
+  };
 }
 
 function joinRelative(...parts) {

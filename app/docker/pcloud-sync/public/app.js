@@ -19,6 +19,9 @@ const fields = {
   oauthCode: form.elements.oauthCode,
   accessToken: form.elements.accessToken,
   concurrency: form.elements.concurrency,
+  renameIfExists: form.elements.renameIfExists,
+  checksumMode: form.elements.checksumMode,
+  checksumSamplePercent: form.elements.checksumSamplePercent,
   logRetentionDays: form.elements.logRetentionDays,
   logRetentionCount: form.elements.logRetentionCount,
   ignorePatterns: form.elements.ignorePatterns
@@ -53,11 +56,8 @@ document.querySelector('#createTask').addEventListener('click', () => {
 
 document.querySelector('#addTask').addEventListener('click', addTaskEditor);
 
-document.querySelector('#scanNow').addEventListener('click', async () => {
-  const scanResult = await post('/api/scan', {});
-  await refreshStatus();
-  show(scanResult.skipped ? '没有可扫描的同步任务' : '扫描已触发');
-});
+document.querySelector('#scanNow').addEventListener('click', () => runScan({ forceRemoteScan: false }));
+document.querySelector('#forceRemoteScan').addEventListener('click', () => runScan({ forceRemoteScan: true }));
 
 document.querySelector('#stopSync').addEventListener('click', async () => {
   const result = await post('/api/stop', {});
@@ -164,6 +164,9 @@ async function loadConfig() {
   fields.clientSecret.value = '';
   fields.accessToken.value = currentConfig.pcloud.accessToken ? TOKEN_MASK : '';
   fields.concurrency.value = currentConfig.sync.concurrency;
+  fields.renameIfExists.checked = currentConfig.sync.renameIfExists === true;
+  fields.checksumMode.value = currentConfig.sync.checksumMode || 'failed';
+  fields.checksumSamplePercent.value = currentConfig.sync.checksumSamplePercent ?? 5;
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
   fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
   fields.ignorePatterns.value = currentConfig.sync.ignorePatterns.join('\n');
@@ -189,6 +192,9 @@ async function saveConfig() {
     tasks,
     sync: {
       concurrency: Number(fields.concurrency.value),
+      renameIfExists: fields.renameIfExists.checked,
+      checksumMode: fields.checksumMode.value,
+      checksumSamplePercent: Number(fields.checksumSamplePercent.value),
       logRetentionDays: Number(fields.logRetentionDays.value),
       logRetentionCount: Number(fields.logRetentionCount.value),
       ignorePatterns: fields.ignorePatterns.value
@@ -246,14 +252,17 @@ function renderTaskCards() {
   taskCards.innerHTML = tasks.map((task) => {
     const counts = taskQueueCounts(task.id);
     const queue = queueByTask.get(task.id);
-    const stats = statsByTask.get(task.id)?.stats || emptyStats();
+    const taskStats = statsByTask.get(task.id) || {};
+    const stats = taskStats.stats || emptyStats();
     const status = taskStatusText({ queue, stats, counts });
+    const scanMode = scanModeText(queue?.scanMode || taskStats.remoteState?.lastScanMode);
     return `
       <article class="task-card">
         <div class="task-card-main">
           <div class="task-card-copy">
             <h3>${escapeHtml(task.name)}</h3>
             <p class="${counts.failed > 0 ? 'danger' : 'success'}">${escapeHtml(status)}</p>
+            ${scanMode ? `<p class="task-scan-mode">扫描依据：${escapeHtml(scanMode)}</p>` : ''}
             <div class="task-stat-grid">
               <span>总 ${formatNumber(stats.total)}</span>
               <span>已存在 ${formatNumber(stats.existing || 0)}</span>
@@ -276,6 +285,22 @@ function renderTaskCards() {
       <button type="button" data-tab="settings">去设置</button>
     </section>
   `;
+}
+
+async function runScan({ forceRemoteScan = false } = {}) {
+  const scanResult = await post('/api/scan', { forceRemoteScan });
+  await refreshStatus();
+  show(scanResult.skipped
+    ? '没有可扫描的同步任务'
+    : forceRemoteScan ? '远端重新比对已触发' : '扫描已触发');
+}
+
+function scanModeText(scanMode) {
+  return {
+    remote_full: '远端全量比对',
+    cache: '本地缓存',
+    remote_diff: '远端增量'
+  }[scanMode] || '';
 }
 
 function taskQueueCounts(taskId) {

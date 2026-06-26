@@ -28,6 +28,35 @@ test('SqliteStore uses state.sqlite and does not create state.json', async () =>
   assert.equal((await stat(path.join(dir, 'state.sqlite'))).isFile(), true);
 });
 
+test('SqliteStore persists per-task pCloud remote scan state', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-sqlite-remote-state-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+
+  await store.setTaskRemoteState('docs', {
+    remotePath: '/Sync/docs',
+    remoteFolderId: 42,
+    diffid: 100,
+    lastScanMode: 'remote_full',
+    lastFullRemoteScanAt: '2026-06-26T10:00:00.000Z'
+  });
+  await store.setTaskRemoteState('docs', {
+    diffid: 101,
+    lastScanMode: 'remote_diff'
+  });
+
+  const state = await store.getTaskRemoteState('docs');
+  const states = await store.listTaskRemoteStates();
+
+  assert.equal(state.taskId, 'docs');
+  assert.equal(state.remotePath, '/Sync/docs');
+  assert.equal(state.remoteFolderId, 42);
+  assert.equal(state.diffid, 101);
+  assert.equal(state.lastScanMode, 'remote_diff');
+  assert.equal(state.lastFullRemoteScanAt, '2026-06-26T10:00:00.000Z');
+  assert.deepEqual(states.map((item) => item.taskId), ['docs']);
+});
+
 test('SqliteStore persists config, files, and events in SQLite', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-sqlite-store-persist-'));
   const store = new SqliteStore(dir);

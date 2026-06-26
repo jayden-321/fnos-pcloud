@@ -66,13 +66,15 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
   if (request.method === 'GET' && url.pathname === '/api/status') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const engineStatus = engine.getStatus?.() ?? {};
+    const remoteStates = new Map((await store.listTaskRemoteStates?.() ?? []).map((state) => [state.taskId, state]));
     return json({
       version: APP_VERSION,
       tasks: config.tasks,
       taskStats: await Promise.all(config.tasks.map(async (task) => ({
         id: task.id,
         name: task.name,
-        stats: await store.stats({ sourceId: task.id })
+        stats: await store.stats({ sourceId: task.id }),
+        remoteState: remoteStates.get(task.id) ?? null
       }))),
       stats: await store.stats(),
       failed: await store.listFiles({ status: 'failed' }),
@@ -122,6 +124,15 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     }));
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/pcloud/stat') {
+    const config = normalizeConfig(await store.loadConfig() ?? {});
+    const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
+    return json(await client.stat({
+      fileid: url.searchParams.get('fileid'),
+      path: url.searchParams.get('path') || ''
+    }));
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/pcloud/diff') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
@@ -140,7 +151,11 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     const taskIds = Array.isArray(body.taskIds)
       ? body.taskIds.map((item) => String(item || '').trim()).filter(Boolean)
       : body.taskId ? [String(body.taskId).trim()].filter(Boolean) : [];
-    return json(await engine.scanNow({ taskIds, trigger: 'manual' }));
+    return json(await engine.scanNow({
+      taskIds,
+      trigger: 'manual',
+      forceRemoteScan: body.forceRemoteScan === true
+    }));
   }
 
   if (request.method === 'POST' && url.pathname === '/api/stop') {

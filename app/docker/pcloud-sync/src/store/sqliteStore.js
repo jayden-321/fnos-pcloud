@@ -42,6 +42,15 @@ export class SqliteStore {
         data TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
+      CREATE TABLE IF NOT EXISTS task_remote_state (
+        task_id TEXT PRIMARY KEY,
+        remote_path TEXT NOT NULL DEFAULT '',
+        remote_folder_id INTEGER,
+        diffid INTEGER,
+        last_scan_mode TEXT NOT NULL DEFAULT '',
+        last_scan_at TEXT NOT NULL DEFAULT '',
+        data TEXT NOT NULL
+      );
     `);
   }
 
@@ -107,6 +116,50 @@ export class SqliteStore {
       map.set(row.key, cloneJson(row.data));
     }
     return map;
+  }
+
+  async getTaskRemoteState(taskId) {
+    const row = this.db.prepare('SELECT data FROM task_remote_state WHERE task_id = ?').get(String(taskId || ''));
+    return row ? cloneJson(row.data) : null;
+  }
+
+  async listTaskRemoteStates() {
+    const rows = this.db.prepare('SELECT data FROM task_remote_state ORDER BY task_id').all();
+    return rows.map((row) => cloneJson(row.data));
+  }
+
+  async setTaskRemoteState(taskId, patch = {}) {
+    const id = String(taskId || '').trim();
+    if (!id) {
+      throw new Error('Task remote state requires task id');
+    }
+    const previous = await this.getTaskRemoteState(id) ?? { taskId: id };
+    const record = {
+      ...previous,
+      ...structuredClone(patch ?? {}),
+      taskId: id,
+      updatedAt: new Date().toISOString()
+    };
+    this.db.prepare(`
+      INSERT INTO task_remote_state (task_id, remote_path, remote_folder_id, diffid, last_scan_mode, last_scan_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(task_id) DO UPDATE SET
+        remote_path = excluded.remote_path,
+        remote_folder_id = excluded.remote_folder_id,
+        diffid = excluded.diffid,
+        last_scan_mode = excluded.last_scan_mode,
+        last_scan_at = excluded.last_scan_at,
+        data = excluded.data
+    `).run(
+      record.taskId,
+      String(record.remotePath || ''),
+      nullableInteger(record.remoteFolderId),
+      nullableInteger(record.diffid),
+      String(record.lastScanMode || ''),
+      String(record.lastScanAt || ''),
+      stringify(record)
+    );
+    return structuredClone(record);
   }
 
   async setStatus(key, status, patch = {}) {
@@ -362,4 +415,12 @@ function clampInteger(value, fallback, min, max) {
     return fallback;
   }
   return Math.min(Math.max(number, min), max);
+}
+
+function nullableInteger(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : null;
 }

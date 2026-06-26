@@ -7,10 +7,11 @@ test('sync log source keeps per-file upload events only', () => {
     { type: 'scan_completed', subject: 'sync', message: '6 discovered, 6 uploaded, 0 failed' },
     { type: 'retry_queued', subject: 'failed files', message: '1 files queued' },
     { type: 'upload_succeeded', subject: 'MACOS/a.txt', message: '/Sync/MACOS/a.txt' },
+    { type: 'upload_verified_after_error', subject: 'MACOS/c.txt', message: '/Sync/MACOS/c.txt' },
     { type: 'upload_failed', subject: 'MACOS/b.txt', message: 'socket hang up' }
   ];
 
-  assert.deepEqual(fileLogEvents(events).map((event) => event.type), ['upload_succeeded', 'upload_failed']);
+  assert.deepEqual(fileLogEvents(events).map((event) => event.type), ['upload_succeeded', 'upload_verified_after_error', 'upload_failed']);
 });
 
 test('sync log row maps one file event to table columns', () => {

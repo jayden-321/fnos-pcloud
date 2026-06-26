@@ -232,6 +232,43 @@ test('PCloudClient streams uploadfile multipart with nopartial and mtime', async
   }
 });
 
+test('PCloudClient sends renameifexists when upload conflict renaming is enabled', async () => {
+  let body = '';
+  const server = await withServer((req, res) => {
+    req.setEncoding('binary');
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        result: 0,
+        fileids: [17],
+        metadata: [{ fileid: 17, name: 'rename (2).txt', path: '/NAS/rename (2).txt' }]
+      }));
+    });
+  });
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-upload-rename-'));
+  const filePath = path.join(dir, 'rename.txt');
+  await writeFile(filePath, 'hello');
+
+  try {
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token' });
+    const result = await client.uploadFile({
+      filePath,
+      filename: 'rename.txt',
+      folderid: 42,
+      renameIfExists: true
+    });
+
+    assert.equal(result.fileids[0], 17);
+    assert.match(body, /name="renameifexists"/);
+    assert.match(body, /\r\n1\r\n/);
+  } finally {
+    await server.close();
+  }
+});
+
 test('PCloudClient aborts an active multipart upload', async () => {
   const server = await withServer((req, res) => {
     req.resume();
@@ -286,6 +323,10 @@ test('PCloudClient wraps progress, checksum, diff, and server selection APIs', a
       res.end(JSON.stringify({ result: 0, sha1: 'abc', md5: 'def' }));
       return;
     }
+    if (url.pathname === '/stat') {
+      res.end(JSON.stringify({ result: 0, metadata: { fileid: Number(url.searchParams.get('fileid')), path: '/NAS/a.txt' } }));
+      return;
+    }
     if (url.pathname === '/diff') {
       res.end(JSON.stringify({ result: 0, diffid: 42, entries: [] }));
       return;
@@ -300,9 +341,11 @@ test('PCloudClient wraps progress, checksum, diff, and server selection APIs', a
     assert.deepEqual((await client.getApiServer()).api, ['api7.pcloud.com', 'api.pcloud.com']);
     assert.equal((await client.uploadProgress('progress-123')).currentfileuploaded, 6);
     assert.equal((await client.checksumFile({ path: '/NAS/a.txt' })).sha1, 'abc');
+    assert.equal((await client.stat({ fileid: 7 })).metadata.path, '/NAS/a.txt');
     assert.equal((await client.diff({ diffid: 41 })).diffid, 42);
     assert.ok(calls.some((call) => call.includes('/uploadprogress') && call.includes('progresshash=progress-123')));
     assert.ok(calls.some((call) => call.includes('/checksumfile') && call.includes('path=%2FNAS%2Fa.txt')));
+    assert.ok(calls.some((call) => call.includes('/stat') && call.includes('fileid=7')));
     assert.ok(calls.some((call) => call.includes('/diff') && call.includes('diffid=41')));
   } finally {
     await server.close();

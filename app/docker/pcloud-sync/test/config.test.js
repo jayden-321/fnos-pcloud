@@ -60,6 +60,32 @@ test('normalizeConfig cleans remote root and source definitions', () => {
   assert.deepEqual(config.sync.ignorePatterns, ['*.tmp', '.DS_Store']);
 });
 
+test('normalizeConfig keeps official upload conflict and checksum options', () => {
+  const config = normalizeConfig({
+    sync: {
+      renameIfExists: true,
+      checksumMode: 'sample',
+      checksumSamplePercent: 25
+    }
+  });
+
+  assert.equal(config.sync.renameIfExists, true);
+  assert.equal(config.sync.checksumMode, 'sample');
+  assert.equal(config.sync.checksumSamplePercent, 25);
+
+  const fallback = normalizeConfig({
+    sync: {
+      renameIfExists: false,
+      checksumMode: 'invalid',
+      checksumSamplePercent: 500
+    }
+  });
+
+  assert.equal(fallback.sync.renameIfExists, false);
+  assert.equal(fallback.sync.checksumMode, 'failed');
+  assert.equal(fallback.sync.checksumSamplePercent, 100);
+});
+
 test('normalizeConfig preserves non-ASCII source names for remote folders', () => {
   const config = normalizeConfig({
     sources: [

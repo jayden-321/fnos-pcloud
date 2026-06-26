@@ -32,7 +32,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.3.0');
+  assert.equal(status.version, '0.3.1');
   assert.equal(status.stats.failed, 1);
   assert.equal(status.stats.existing, 1);
   assert.deepEqual(status.tasks, []);
@@ -105,7 +105,31 @@ test('HTTP API passes a requested task id to manual scans', async () => {
   }));
 
   assert.equal(response.status, 200);
-  assert.deepEqual(scanOptions, { taskIds: ['docs'], trigger: 'manual' });
+  assert.deepEqual(scanOptions, { taskIds: ['docs'], trigger: 'manual', forceRemoteScan: false });
+});
+
+test('HTTP API passes force remote scan requests to manual scans', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-force-scan-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  let scanOptions = null;
+
+  const app = createApp({
+    store,
+    engine: {
+      scanNow: async (options) => {
+        scanOptions = options;
+        return { queued: 0 };
+      }
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/scan', {
+    method: 'POST',
+    body: JSON.stringify({ forceRemoteScan: true })
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(scanOptions, { taskIds: [], trigger: 'manual', forceRemoteScan: true });
 });
 
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {
@@ -319,6 +343,10 @@ test('HTTP API exposes pCloud progress, checksum, diff, and server APIs', async 
         calls.push(['checksumFile', payload.path]);
         return { sha1: 'abc' };
       },
+      stat: async (payload) => {
+        calls.push(['stat', payload.fileid]);
+        return { metadata: { fileid: Number(payload.fileid), path: '/NAS/a.txt' } };
+      },
       diff: async (payload) => {
         calls.push(['diff', payload.diffid]);
         return { diffid: 43, entries: [] };
@@ -330,12 +358,14 @@ test('HTTP API exposes pCloud progress, checksum, diff, and server APIs', async 
   assert.deepEqual(await (await app.fetch(new Request('http://local/api/pcloud/api-server'))).json(), { api: ['api7.pcloud.com'] });
   assert.deepEqual(await (await app.fetch(new Request('http://local/api/pcloud/upload-progress?progresshash=h1'))).json(), { uploaded: 10, total: 20 });
   assert.deepEqual(await (await app.fetch(new Request('http://local/api/pcloud/checksum?path=/NAS/a.txt'))).json(), { sha1: 'abc' });
+  assert.deepEqual(await (await app.fetch(new Request('http://local/api/pcloud/stat?fileid=9'))).json(), { metadata: { fileid: 9, path: '/NAS/a.txt' } });
   assert.deepEqual(await (await app.fetch(new Request('http://local/api/pcloud/diff?diffid=42'))).json(), { diffid: 43, entries: [] });
   assert.deepEqual(calls, [
     'currentServer',
     'getApiServer',
     ['uploadProgress', 'h1'],
     ['checksumFile', '/NAS/a.txt'],
+    ['stat', '9'],
     ['diff', '42']
   ]);
 });
