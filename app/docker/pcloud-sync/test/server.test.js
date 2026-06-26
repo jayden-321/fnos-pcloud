@@ -18,6 +18,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
   });
   await store.upsertFile({ key: 'a.txt', status: 'failed', size: 1, error: 'quota' });
   await store.upsertFile({ key: 'b.txt', status: 'uploading', size: 2, error: '' });
+  await store.upsertFile({ key: 'c.txt', status: 'existing', size: 3, error: '' });
   for (let index = 0; index < 75; index += 1) {
     await store.addEvent('upload_failed', `docs/${index}.txt`, 'socket hang up');
   }
@@ -31,8 +32,9 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.2.4');
+  assert.equal(status.version, '0.2.5');
   assert.equal(status.stats.failed, 1);
+  assert.equal(status.stats.existing, 1);
   assert.deepEqual(status.tasks, []);
   assert.deepEqual(status.uploading.map((file) => file.key), ['b.txt']);
   assert.equal(status.events.length, 75);

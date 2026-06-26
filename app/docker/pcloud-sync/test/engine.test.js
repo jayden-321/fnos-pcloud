@@ -473,8 +473,84 @@ test('SyncEngine skips files already present in the remote directory', async () 
   assert.equal(result.queued, 0);
   assert.equal(result.uploaded, 0);
   assert.equal(uploads, 0);
-  assert.equal(files[0].status, 'synced');
+  assert.equal(result.existing, 1);
+  assert.equal(files[0].status, 'existing');
   assert.equal(files[0].pcloudPath, '/NAS/Docs/a.txt');
+  assert.equal((await store.stats()).existing, 1);
+  assert.equal((await store.stats()).synced, 0);
+});
+
+test('SyncEngine clears stale file state before rebuilding a scan from current tasks', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'current.txt');
+  await writeFile(filePath, 'fresh');
+  const info = await stat(filePath);
+
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'docs', localPath: sourceDir, remotePath: '/Sync/Psync', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'old-task/old.txt',
+    sourceId: 'old-task',
+    absolutePath: '/missing/old.txt',
+    relativePath: 'old.txt',
+    remotePath: '/Old/old.txt',
+    size: 1,
+    status: 'pending'
+  });
+  await store.upsertFile({
+    key: 'old-task/failed.txt',
+    sourceId: 'old-task',
+    absolutePath: '/missing/failed.txt',
+    relativePath: 'failed.txt',
+    remotePath: '/Old/failed.txt',
+    size: 2,
+    status: 'failed',
+    error: 'stale'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      listRemoteFiles: async () => new Map([
+        ['current.txt', { relativePath: 'current.txt', size: 5, mtimeMs: Math.trunc(info.mtimeMs) }]
+      ]),
+      ensureFolder: async () => {
+        throw new Error('upload should not run for existing files');
+      },
+      uploadFile: async () => {
+        throw new Error('upload should not run for existing files');
+      }
+    })
+  });
+
+  const result = await engine.scanNow();
+  const files = await store.listFiles();
+  const stats = await store.stats();
+
+  assert.equal(result.discovered, 1);
+  assert.equal(result.existing, 1);
+  assert.deepEqual(files.map((file) => file.key), ['docs/current.txt']);
+  assert.equal(files[0].status, 'existing');
+  assert.deepEqual({
+    total: stats.total,
+    existing: stats.existing,
+    synced: stats.synced,
+    failed: stats.failed,
+    pending: stats.pending,
+    uploading: stats.uploading
+  }, {
+    total: 1,
+    existing: 1,
+    synced: 0,
+    failed: 0,
+    pending: 0,
+    uploading: 0
+  });
 });
 
 test('SyncEngine ignores old dashed state and uploads to the normalized source directory', async () => {

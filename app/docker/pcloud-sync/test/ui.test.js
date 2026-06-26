@@ -44,6 +44,18 @@ test('sync logs expose file size, progress, and uploading status filters', async
   assert.match(script, /uploadToLogRow/);
 });
 
+test('task metrics include a separate existing-file count', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="statExisting"/);
+  assert.match(html, />已存在</);
+  assert.match(script, /statExisting/);
+  assert.match(script, /stats\.existing/);
+});
+
 test('web UI exposes stop sync and opens pCloud picker from the selected folder or root', async () => {
   const [html, script] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),

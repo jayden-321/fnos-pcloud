@@ -204,6 +204,7 @@ async function refreshStatus() {
   setText('appVersion', currentStatus.version ? `v${currentStatus.version}` : '');
   setText('statTotal', currentStatus.stats.total);
   setText('statSynced', currentStatus.stats.synced);
+  setText('statExisting', currentStatus.stats.existing || 0);
   setText('statFailed', currentStatus.stats.failed);
   setText('statPending', currentStatus.stats.pending);
   setText('statUploading', currentStatus.stats.uploading);

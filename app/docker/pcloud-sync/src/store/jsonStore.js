@@ -135,6 +135,15 @@ export class JsonStore {
     return count;
   }
 
+  async clearFiles() {
+    const count = Object.keys(this.state.files).length;
+    this.state.files = {};
+    if (count > 0) {
+      await this.#save();
+    }
+    return count;
+  }
+
   async addEvent(type, subject, message, details = {}) {
     this.state.events.unshift({
       ...structuredClone(details ?? {}),
@@ -174,6 +183,7 @@ export class JsonStore {
     const stats = {
       total: 0,
       synced: 0,
+      existing: 0,
       failed: 0,
       pending: 0,
       uploading: 0,
@@ -185,6 +195,8 @@ export class JsonStore {
       if (file.status === 'synced') {
         stats.synced += 1;
         stats.bytesSynced += Number(file.size || 0);
+      } else if (file.status === 'existing') {
+        stats.existing += 1;
       } else if (file.status === 'failed') {
         stats.failed += 1;
       } else if (file.status === 'uploading') {

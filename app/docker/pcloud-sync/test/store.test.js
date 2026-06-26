@@ -13,11 +13,13 @@ test('JsonStore persists config and file records with aggregate stats', async ()
   await store.saveConfig({ port: 8080, sources: [] });
   await store.upsertFile({ key: 'photos/a.jpg', status: 'synced', size: 12 });
   await store.upsertFile({ key: 'photos/b.jpg', status: 'failed', size: 8, error: 'quota' });
+  await store.upsertFile({ key: 'photos/c.jpg', status: 'existing', size: 6 });
   await store.addEvent('upload_failed', 'photos/b.jpg', 'quota', { size: 8 });
 
   assert.deepEqual(await store.stats(), {
-    total: 2,
+    total: 3,
     synced: 1,
+    existing: 1,
     failed: 1,
     pending: 0,
     uploading: 0,
@@ -27,12 +29,33 @@ test('JsonStore persists config and file records with aggregate stats', async ()
   const reloaded = new JsonStore(dir);
   await reloaded.init();
   assert.equal((await reloaded.loadConfig()).port, 8080);
-  assert.equal((await reloaded.listFiles()).length, 2);
+  assert.equal((await reloaded.listFiles()).length, 3);
   assert.equal((await reloaded.listEvents()).length, 1);
 
   const disk = JSON.parse(await readFile(path.join(dir, 'state.json'), 'utf8'));
   assert.equal(disk.files['photos/b.jpg'].error, 'quota');
   assert.equal(disk.events[0].size, 8);
+});
+
+test('JsonStore clears file records for a fresh scan rebuild', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-clear-files-'));
+  const store = new JsonStore(dir);
+  await store.init();
+
+  await store.upsertFile({ key: 'old/a.txt', status: 'pending', size: 1 });
+  await store.upsertFile({ key: 'old/b.txt', status: 'failed', size: 2 });
+
+  assert.equal(await store.clearFiles(), 2);
+  assert.deepEqual(await store.listFiles(), []);
+  assert.deepEqual(await store.stats(), {
+    total: 0,
+    synced: 0,
+    existing: 0,
+    failed: 0,
+    pending: 0,
+    uploading: 0,
+    bytesSynced: 0
+  });
 });
 
 test('JsonStore serializes concurrent saves without tmp-file races', async () => {
