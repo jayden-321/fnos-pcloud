@@ -2,72 +2,81 @@
 
 fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. It supports multiple one-way upload tasks, local and remote folder pickers, pCloud API based remote scanning, retry handling, detailed sync logs, and upload progress. The project is designed for personal self-hosted NAS backup and does not include any bundled pCloud credentials, user IDs, secrets, or tokens.
 
-## 功能
+## Features
 
-- 多个 NAS 本地目录 -> pCloud 单向上传。
-- 本地删除不会删除 pCloud 文件。
-- Web UI 提供同步任务、同步日志和设置三个页面。
-- 支持从 NAS 挂载目录中选择本地文件夹，并从 pCloud 目录树中选择或新建远端文件夹。
-- 展示总文件数、成功数、失败数、待上传数、上传速度和可筛选的同步日志。
-- 失败或卡住文件支持自动保留和手动重试，重试后会立即处理待上传队列。
+- One-way uploads from multiple NAS folders to pCloud.
+- Local deletions are not propagated to pCloud.
+- Web UI with Sync Tasks, Sync Logs, and Settings pages.
+- Local folder picker for NAS paths that are visible inside the container.
+- pCloud remote folder picker and remote folder creation.
+- Summary metrics for total files, synced files, failed files, pending files, active uploads, and aggregate upload speed.
+- Filterable sync logs.
+- Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
 
-## pCloud 授权
+## pCloud Authorization
 
-本应用使用 pCloud OAuth 2.0。仓库里不会内置任何 Client ID、Client Secret、access token 或个人账号信息，需要每个使用者自己去 pCloud 官方申请。
+This app uses pCloud OAuth 2.0. The repository does not include any Client ID, Client Secret, access token, or personal account data. Each user must request and configure their own pCloud API/OAuth application credentials.
 
-1. 打开 [pCloud for Developers](https://docs.pcloud.com/)。
-2. 进入开发者文档里的 [My Apps](https://docs.pcloud.com/my_apps/) 创建 OAuth 应用，拿到 Client ID 和 Client Secret。
-3. 如果你的账号看不到 My Apps、不能创建应用，或需要开通 API/OAuth 权限，请通过 [pCloud Contact Support](https://help.pcloud.com/contact) 联系官方，也可以写邮件到 `support@pcloud.com`，说明你要为个人/自建 NAS 同步工具申请 pCloud API OAuth app，申请 Client ID 和 Client Secret。
-4. 打开授权地址获取 code：
+1. Open [pCloud for Developers](https://docs.pcloud.com/).
+2. Open [My Apps](https://docs.pcloud.com/my_apps/) and create an OAuth app to obtain a Client ID and Client Secret.
+3. If your account cannot access My Apps, cannot create an app, or needs API/OAuth access enabled, contact [pCloud Support](https://help.pcloud.com/contact). You can also email `support@pcloud.com` and explain that you need a pCloud API OAuth app for a personal self-hosted NAS sync tool.
+4. Open the authorization URL and replace `<CLIENT_ID>` with your app Client ID:
 
    `https://my.pcloud.com/oauth2/authorize?client_id=<CLIENT_ID>&response_type=code`
 
-5. 浏览器会要求登录 pCloud 账号并授权应用。授权完成后页面会显示一次性 code，通常 600 秒内有效。
-6. 在应用 UI 填入 Client ID、Client Secret 和授权 Code，点击“换取 Token”。
-7. 如果 pCloud 返回了数据中心 hostname，应用会自动保存并使用对应官方 API host，例如 `api.pcloud.com`、`eapi.pcloud.com` 或 pCloud 返回的区域 API host。
+5. Sign in to pCloud and authorize the app. pCloud will show a one-time authorization code, usually valid for 600 seconds.
+6. In the app UI, enter the Client ID, Client Secret, and authorization code, then click the token exchange button.
+7. If pCloud returns a data-center hostname, the app saves and uses that official API host, such as `api.pcloud.com`, `eapi.pcloud.com`, or a regional pCloud API host.
 
-请不要把 Client Secret、授权 code、access token、`state.json` 或 `.env` 文件提交到公开仓库。`.gitignore` 已默认忽略常见运行状态和打包产物。
+Do not commit Client Secrets, authorization codes, access tokens, `state.json`, or `.env` files to a public repository. Common runtime state and package artifacts are ignored by `.gitignore`.
 
-更多公开仓库安全注意事项见 [SECURITY.md](SECURITY.md)。
+See [SECURITY.md](SECURITY.md) for public-repository safety notes.
 
-## 使用到的 pCloud API
+## pCloud APIs Used
 
-当前同步逻辑只走 pCloud 官方 HTTP/JSON API：
+The sync logic uses the official pCloud HTTP/JSON API:
 
 - OAuth: `oauth2_token`
-- 账号连通性: `userinfo`
-- 远端目录浏览和比对: `listfolder`
-- 远端目录创建: `createfolderifnotexists`
-- 上传: `uploadfile`
-- 上传服务器选择: `getapiserver`、`currentserver`
-- 上传进度/速度: `uploadprogress` + `uploadfile` 的 `progresshash`
-- 远端校验/后续增量能力: `checksumfile`、`diff`
+- Account connectivity: `userinfo`
+- Remote browsing and comparison: `listfolder`
+- Remote folder creation: `createfolderifnotexists`
+- Uploads: `uploadfile`
+- Upload server selection: `getapiserver`, `currentserver`
+- Upload progress and speed: `uploadprogress` plus the `progresshash` parameter on `uploadfile`
+- Remote verification and future incremental features: `checksumfile`, `diff`
 
-本地文件夹选择来自 NAS 容器内可见目录，这部分不是 pCloud API 能提供的能力；远端文件夹选择、新建、上传、进度和校验相关能力都通过 pCloud API 实现。
+The local folder picker reads NAS paths that are mounted into the Docker container. pCloud does not provide an API for local NAS filesystem browsing. Remote folder browsing, remote folder creation, uploads, progress, and verification-related features are implemented through pCloud APIs.
 
-## NAS 目录
+## NAS Folder Mounts
 
-默认 Docker Compose 只读挂载 `/vol1:/vol1:ro`。如果你的同步目录在 `/vol2` 或其他卷，请在 `app/docker/docker-compose.yaml` 里增加对应只读挂载，例如：
+The default Docker Compose file mounts `/vol1` read-only:
+
+```yaml
+volumes:
+  - "/vol1:/vol1:ro"
+```
+
+If your sync folders are on `/vol2` or another volume, add the matching read-only mount in `app/docker/docker-compose.yaml`, for example:
 
 ```yaml
 volumes:
   - "/vol2:/vol2:ro"
 ```
 
-UI 里可以通过“选择”按钮浏览容器可见路径，例如 `/vol1/1000/photos`。默认只读挂载 `/vol1`，因此选择器默认只能看到 `/vol1` 系列目录；新增其他卷后可在任务设置里选择。
+The UI folder picker can browse paths that are visible inside the container, such as `/vol1/1000/photos`. By default, only `/vol1` is mounted and visible. Add more volume mounts if you need to browse other NAS volumes.
 
-## 基础镜像源
+## Base Image
 
-飞牛安装时会在 NAS 上构建 Docker 镜像。默认基础镜像使用国内 DaoCloud 镜像 `docker.m.daocloud.io/library/node:22-alpine`，避免 Docker Hub 短名 `node:22-alpine` 被 NAS 的 Docker Hub 代理解析到 `docker.fnnas.com` 后出现 401。
+fnOS builds the Docker image on the NAS during installation. The default base image is the DaoCloud mirror `docker.m.daocloud.io/library/node:22-alpine`, which avoids Docker Hub proxy issues that can happen when the NAS resolves `node:22-alpine` through `docker.fnnas.com`.
 
-如果你的 NAS 无法访问 DaoCloud，可以在 `app/docker/docker-compose.yaml` 里把 `NODE_BASE_IMAGE` 改成你能访问的 Node 22 Alpine 镜像，例如：
+If your NAS cannot access DaoCloud, edit `app/docker/docker-compose.yaml` and set `NODE_BASE_IMAGE` to a Node 22 Alpine image that your NAS can pull:
 
 ```yaml
 args:
   NODE_BASE_IMAGE: docker.m.daocloud.io/library/node:22-alpine
 ```
 
-## 本地开发
+## Local Development
 
 ```bash
 cd app/docker/pcloud-sync
@@ -75,30 +84,34 @@ node --test
 DATA_DIR="$(pwd)/.data" PORT=17880 node src/index.js
 ```
 
-## 打包
+## Packaging
 
-在应用根目录执行：
+Run this from the app root:
 
 ```bash
 fnpack build
 ```
 
-官方 Docker 应用模板要求根目录包含 `manifest`、`cmd/main`、`config/resource`、`config/privilege`、`app/docker/docker-compose.yaml` 和 `app/ui/config`。本项目已按该结构组织。
+The fnOS Docker app template expects the root directory to include `manifest`, `cmd/main`, `config/resource`, `config/privilege`, `app/docker/docker-compose.yaml`, and `app/ui/config`. This repository is organized around that structure.
 
-## 当前限制
+## Current Limitations
 
-- v0.2.0 仍是单向上传，不做双向同步。
-- v0.2.0 不传播本地删除到 pCloud。
-- 文件变化目前通过定时扫描发现，默认 300 秒一次；也可以在 UI 手动触发扫描。
-- 首次安装后的真实 FPK 行为建议在飞牛 NAS 上用应用中心实机验证。
+- v0.2.0 is one-way upload only, not two-way sync.
+- v0.2.0 does not propagate local deletions to pCloud.
+- File changes are discovered by periodic scans. The default interval is 300 seconds, and users can trigger a manual scan in the UI.
+- Real installation behavior should still be validated on an fnOS NAS through the app center.
 
-## 变更记录
+## Changelog
 
-- v0.2.0: 升级为多任务模型，新增左侧导航、本地文件夹选择、pCloud 远端文件夹选择、远端新建文件夹和上传总速度；接入 `getapiserver`、`currentserver`、`uploadprogress`、`checksumfile` 和 `diff` 等 pCloud 官方 API；同步日志保留表格筛选，旧 `sources` 配置会自动迁移为任务。
-- v0.1.9: 同步日志改为表格视图，支持按任务、状态和文件名筛选；成功上传会记录逐文件日志；重试失败或卡住文件后会立即处理待上传队列。
-- v0.1.8: 修复 0 失败但仍有文件卡在 `uploading` 时重试和队列处理无法继续上传的问题，状态接口和页面显示运行版本及上传中文件明细。
-- v0.1.7: 采用 rsync-like 远端真实比对，扫描 pCloud 目录后跳过已存在未变化文件，只上传远端缺失或已变化文件，并清理旧 `--` 状态。
-- v0.1.6: 修复历史上传中断后文件长期停留在 `uploading` 导致无法重试的问题；迁移旧 `--` 远端目录名时保留内部状态并重新上传到正确目录。
-- v0.1.5: 修复中文源目录名被自动转换成 `--` 远端文件夹的问题，并迁移旧的 `--` 配置。
-- v0.1.4: 修复远端目录需逐级创建、状态文件并发保存冲突，并为上传增加 `Content-Length` 和瞬时断线重试。
-- v0.1.3: 修复 OAuth access token 调用 pCloud API 时的参数名，改用 `access_token`。
+- v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`. Keeps filterable sync logs and automatically migrates legacy `sources` config into tasks.
+- v0.1.9: Converts sync logs into a table view with task, status, and filename filters. Successful uploads now create per-file log entries. Retrying failed or stale files immediately drains the pending queue.
+- v0.1.8: Fixes files stuck in `uploading` when the failed count is zero. Status API and UI now show the running version and uploading-file details.
+- v0.1.7: Adds rsync-like remote comparison. The app scans the pCloud destination, skips unchanged remote files, uploads missing or changed files, and cleans old `--` state.
+- v0.1.6: Recovers stale `uploading` files after interrupted uploads. Legacy `--` remote directory migrations preserve internal state and re-upload to the corrected directory.
+- v0.1.5: Fixes non-ASCII source folder names being converted into `--` remote folders and migrates old `--` config.
+- v0.1.4: Fixes parent folder creation, concurrent state-file writes, upload `Content-Length`, and transient socket reset retries.
+- v0.1.3: Fixes pCloud API calls to use the OAuth `access_token` parameter.
+- v0.1.2: Switches the default base image to a DaoCloud mirror for easier installation in China.
+- v0.1.1: Fixes fnOS installation failures caused by Docker Hub proxy 401 errors when pulling `node:22-alpine`.
+- v0.1.0: Initial one-way sync release with pCloud authorization, folder config, status metrics, and failed-file retry.
+
