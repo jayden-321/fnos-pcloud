@@ -58,7 +58,7 @@ test('planUploads uploads files that are missing from remote', () => {
   assert.deepEqual(plan.unchanged, []);
 });
 
-test('planUploads uploads files when remote size or mtime differs', () => {
+test('planUploads uploads files when remote size differs', () => {
   const discovered = [
     { key: '财务/a.txt', relativePath: 'a.txt', size: 5, mtimeMs: 2000 },
     { key: '财务/b.txt', relativePath: 'b.txt', size: 9, mtimeMs: 4000 }
@@ -70,7 +70,38 @@ test('planUploads uploads files when remote size or mtime differs', () => {
 
   const plan = planUploads(discovered, new Map(), { remoteFiles: remote });
 
-  assert.deepEqual(plan.pending.map((item) => item.key), ['财务/a.txt', '财务/b.txt']);
+  assert.deepEqual(plan.pending.map((item) => item.key), ['财务/a.txt']);
+  assert.deepEqual(plan.unchanged.map((item) => item.key), ['财务/b.txt']);
+});
+
+test('planUploads adopts existing remote files by same path and size on first scan', () => {
+  const discovered = [
+    { key: '财务/a.txt', relativePath: 'a.txt', size: 5, mtimeMs: 2000 }
+  ];
+  const remote = new Map([
+    ['a.txt', { relativePath: 'a.txt', size: 5, mtimeMs: 1000 }]
+  ]);
+
+  const plan = planUploads(discovered, new Map(), { remoteFiles: remote });
+
+  assert.deepEqual(plan.pending, []);
+  assert.deepEqual(plan.unchanged.map((item) => item.key), ['财务/a.txt']);
+});
+
+test('planUploads uploads same-size files when local mtime changed after an accepted remote match', () => {
+  const discovered = [
+    { key: '财务/a.txt', relativePath: 'a.txt', size: 5, mtimeMs: 7000 }
+  ];
+  const known = new Map([
+    ['财务/a.txt', { key: '财务/a.txt', relativePath: 'a.txt', size: 5, mtimeMs: 2000, status: 'existing' }]
+  ]);
+  const remote = new Map([
+    ['a.txt', { relativePath: 'a.txt', size: 5, mtimeMs: 1000 }]
+  ]);
+
+  const plan = planUploads(discovered, known, { remoteFiles: remote });
+
+  assert.deepEqual(plan.pending.map((item) => item.key), ['财务/a.txt']);
   assert.deepEqual(plan.unchanged, []);
 });
 

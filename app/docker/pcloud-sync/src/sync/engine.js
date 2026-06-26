@@ -66,12 +66,13 @@ export class SyncEngine {
     try {
       const config = normalizeConfig(await this.store.loadConfig() ?? {});
       await this.store.resetUploading();
-      await this.store.clearFiles();
       const known = await this.store.fileMap();
+      await this.store.clearFiles();
       const activeKeys = new Set();
       const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
       const result = {
         discovered: 0,
+        remoteFiles: 0,
         queued: 0,
         existing: 0,
         unchanged: 0,
@@ -109,6 +110,7 @@ export class SyncEngine {
         }
 
         const planOptions = remoteFiles ? { remoteFiles } : {};
+        result.remoteFiles += remoteFiles?.size ?? 0;
         const plan = planUploads(discovered, known, planOptions);
         result.discovered += discovered.length;
         result.queued += plan.pending.length;
@@ -151,7 +153,7 @@ export class SyncEngine {
       }
 
       this.lastRunAt = new Date().toISOString();
-      await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed`);
+      await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.remoteFiles} remote, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed`);
       return result;
     } catch (error) {
       this.lastError = error.message;

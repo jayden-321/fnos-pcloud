@@ -12,7 +12,7 @@ export function planUploads(discovered, knownFiles, options = {}) {
     const existing = known.get(file.key);
     if (remote) {
       const remoteFile = remote.get(file.relativePath);
-      if (remoteFile && sameRemoteFile(file, remoteFile)) {
+      if (remoteFile && sameRemoteFile(file, remoteFile, existing)) {
         unchanged.push({ ...file, remote: remoteFile });
       } else {
         pending.push(file);
@@ -44,7 +44,7 @@ function needsRetry(file) {
   return ['failed', 'pending', 'uploading'].includes(file.status);
 }
 
-function sameRemoteFile(local, remote) {
+function sameRemoteFile(local, remote, previous = null) {
   if (Number(local.size) !== Number(remote.size)) {
     return false;
   }
@@ -53,5 +53,15 @@ function sameRemoteFile(local, remote) {
   if (!Number.isFinite(localMtime) || !Number.isFinite(remoteMtime) || remoteMtime <= 0) {
     return true;
   }
-  return Math.abs(localMtime - remoteMtime) <= MTIME_TOLERANCE_MS;
+  if (Math.abs(localMtime - remoteMtime) <= MTIME_TOLERANCE_MS) {
+    return true;
+  }
+  if (!previous) {
+    return true;
+  }
+  const previousMtime = Number(previous.mtimeMs || 0);
+  if (!Number.isFinite(previousMtime) || previousMtime <= 0) {
+    return true;
+  }
+  return Math.abs(localMtime - previousMtime) <= MTIME_TOLERANCE_MS;
 }
