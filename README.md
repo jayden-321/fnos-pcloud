@@ -10,6 +10,8 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Local folder picker for NAS paths that are visible inside the container.
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, active uploads, and aggregate upload speed.
+- Task queue execution: each task scans and uploads before the next task starts.
+- Per-task scheduling: manual, interval, daily, and weekly schedules are supported.
 - Filterable file-level sync logs with file size and active upload progress.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
@@ -115,13 +117,14 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.6 is one-way upload only, not two-way sync.
-- v0.2.6 does not propagate local deletions to pCloud.
+- v0.2.7 is one-way upload only, not two-way sync.
+- v0.2.7 does not propagate local deletions to pCloud.
 - File changes are discovered by periodic scans. The default interval is 300 seconds, and users can trigger a manual scan in the UI.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.2.7: Adds task-queue execution so one task scans and uploads before the next task starts. The dashboard shows current-task metrics while a task is running, task cards show per-task counts, and each task can run manually, by interval, daily, or weekly.
 - v0.2.6: Improves takeover of existing pCloud folders. On the first scan of a destination, files with the same relative path and size are counted as Existing even if pCloud reports a different modified time. Later same-size local changes still upload because the planner keeps previous scan metadata before rebuilding the visible queue. Scan completion events now include the remote file count.
 - v0.2.5: Rebuilds file state from the current task set at the start of each scan, clearing stale pending or failed records left by previous tasks. Adds a separate Existing metric for files that already match the pCloud destination so remote matches no longer inflate the uploaded count.
 - v0.2.4: Removes the default pCloud root setting from the UI, treats each task's pCloud folder as the exact remote destination, opens the remote picker from root when no folder is selected, and adds a Stop Sync action that aborts active uploads back to pending.

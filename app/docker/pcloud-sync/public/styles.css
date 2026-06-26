@@ -152,6 +152,12 @@ dt {
   margin-bottom: 16px;
 }
 
+.metric-scope {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-weight: 650;
+}
+
 .metrics div,
 .panel,
 .task-card,
@@ -195,6 +201,15 @@ dt {
 
 .task-card-copy {
   min-width: 0;
+}
+
+.task-stat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .task-card-actions {
@@ -318,6 +333,35 @@ textarea {
 
 .input-action input {
   min-width: 0;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.weekday-row {
+  align-content: start;
+}
+
+.weekday-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weekday-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.weekday-options input {
+  width: auto;
 }
 
 .table-wrap {

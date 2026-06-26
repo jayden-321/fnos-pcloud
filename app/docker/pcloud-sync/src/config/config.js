@@ -146,7 +146,8 @@ function normalizeTasks(input, legacySources, remoteRoot) {
       enabled: item?.enabled !== false,
       localPath,
       remotePath: cleanRemoteRoot(item?.remotePath || joinRemote(item?.remoteName || fallbackName)),
-      mode: 'upload'
+      mode: 'upload',
+      ...schedulePatch(item?.schedule)
     });
   }
   return tasks;
@@ -190,6 +191,56 @@ function cleanRemoteName(value) {
 
 function cleanTaskName(value) {
   return cleanRemoteName(value);
+}
+
+function schedulePatch(input) {
+  const schedule = normalizeTaskSchedule(input);
+  return schedule ? { schedule } : {};
+}
+
+function normalizeTaskSchedule(input) {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+  const type = String(input.type || '').trim();
+  if (type === 'manual') {
+    return { type: 'manual' };
+  }
+  if (type === 'daily') {
+    return { type: 'daily', time: cleanScheduleTime(input.time) };
+  }
+  if (type === 'weekly') {
+    return {
+      type: 'weekly',
+      time: cleanScheduleTime(input.time),
+      weekdays: normalizeWeekdays(input.weekdays)
+    };
+  }
+  if (type === 'interval') {
+    return {
+      type: 'interval',
+      intervalSeconds: clampInteger(input.intervalSeconds, DEFAULT_CONFIG.sync.intervalSeconds, 30, 86400)
+    };
+  }
+  return null;
+}
+
+function cleanScheduleTime(value) {
+  const raw = String(value || '').trim();
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(raw);
+  return match ? raw : '00:00';
+}
+
+function normalizeWeekdays(input) {
+  const values = Array.isArray(input) ? input : [];
+  const seen = new Set();
+  for (const value of values) {
+    const number = Number.parseInt(value, 10);
+    if (Number.isInteger(number) && number >= 0 && number <= 6) {
+      seen.add(number);
+    }
+  }
+  return [...seen].sort((a, b) => a - b);
 }
 
 function normalizeSourceName(value, legacyValue, fallback) {

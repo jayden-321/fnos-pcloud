@@ -16,6 +16,10 @@ export class SyncEngine {
     this.lastError = '';
     this.activeUploads = new Map();
     this.stopRequested = false;
+    this.currentTaskId = '';
+    this.currentTaskName = '';
+    this.taskQueue = [];
+    this.scheduleSlots = new Map();
   }
 
   getStatus() {
@@ -25,6 +29,9 @@ export class SyncEngine {
       stopping: this.stopRequested && (this.running || this.activeUploads.size > 0),
       lastRunAt: this.lastRunAt,
       lastError: this.lastError,
+      currentTaskId: this.currentTaskId,
+      currentTaskName: this.currentTaskName,
+      taskQueue: structuredClone(this.taskQueue),
       uploadSpeedBytesPerSecond: this.uploadSpeedBytesPerSecond(),
       activeUploads: [...this.activeUploads.entries()].map(([key, upload]) => ({
         key,
@@ -36,15 +43,14 @@ export class SyncEngine {
   }
 
   async start() {
-    const config = normalizeConfig(await this.store.loadConfig() ?? {});
     if (this.timer) {
       clearInterval(this.timer);
     }
     this.timer = setInterval(() => {
-      this.scanNow().catch((error) => {
+      this.runDueTasks().catch((error) => {
         this.lastError = error.message;
       });
-    }, config.sync.intervalSeconds * 1000);
+    }, 30 * 1000);
     this.timer.unref?.();
   }
 
@@ -55,7 +61,7 @@ export class SyncEngine {
     }
   }
 
-  async scanNow() {
+  async scanNow(options = {}) {
     if (this.running) {
       return { skipped: true, reason: 'scan already running' };
     }
@@ -67,7 +73,11 @@ export class SyncEngine {
       const config = normalizeConfig(await this.store.loadConfig() ?? {});
       await this.store.resetUploading();
       const known = await this.store.fileMap();
-      await this.store.clearFiles();
+      const requestedTaskIds = normalizeTaskIds(options.taskIds);
+      const tasks = config.tasks
+        .filter((item) => item.enabled)
+        .filter((item) => requestedTaskIds.length === 0 || requestedTaskIds.includes(item.id));
+      await this.store.clearFiles(requestedTaskIds.length > 0 ? { sourceIds: requestedTaskIds } : {});
       const activeKeys = new Set();
       const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
       const result = {
@@ -78,19 +88,46 @@ export class SyncEngine {
         unchanged: 0,
         missingLocal: 0,
         uploaded: 0,
-        failed: 0
+        failed: 0,
+        taskResults: []
       };
+      this.taskQueue = tasks.map((task) => ({
+        id: task.id,
+        name: task.name,
+        status: 'queued',
+        discovered: 0,
+        remoteFiles: 0,
+        existing: 0,
+        queued: 0,
+        uploaded: 0,
+        failed: 0,
+        stopped: 0
+      }));
 
-      for (const source of config.tasks.filter((item) => item.enabled)) {
+      for (const source of tasks) {
         if (this.stopRequested) {
           break;
         }
+        this.currentTaskId = source.id;
+        this.currentTaskName = source.name;
+        const taskResult = this.taskQueue.find((item) => item.id === source.id);
+        Object.assign(taskResult, {
+          status: 'running',
+          startedAt: new Date().toISOString()
+        });
         let discovered = [];
         try {
           discovered = await scanSource(source, config.sync.ignorePatterns);
         } catch (error) {
           await this.store.addEvent('scan_failed', source.localPath, error.message);
           result.failed += 1;
+          Object.assign(taskResult, {
+            status: 'failed',
+            failed: taskResult.failed + 1,
+            error: error.message,
+            finishedAt: new Date().toISOString()
+          });
+          result.taskResults.push(structuredClone(taskResult));
           continue;
         }
 
@@ -105,6 +142,14 @@ export class SyncEngine {
           } catch (error) {
             await this.store.addEvent('remote_scan_failed', source.name, error.message);
             result.failed += 1;
+            Object.assign(taskResult, {
+              status: 'failed',
+              discovered: discovered.length,
+              failed: taskResult.failed + 1,
+              error: error.message,
+              finishedAt: new Date().toISOString()
+            });
+            result.taskResults.push(structuredClone(taskResult));
             continue;
           }
         }
@@ -117,6 +162,12 @@ export class SyncEngine {
         result.existing += remoteFiles ? plan.unchanged.length : 0;
         result.unchanged += plan.unchanged.length;
         result.missingLocal += plan.missingLocal.length;
+        Object.assign(taskResult, {
+          discovered: discovered.length,
+          remoteFiles: remoteFiles?.size ?? 0,
+          queued: plan.pending.length,
+          existing: remoteFiles ? plan.unchanged.length : 0
+        });
 
         for (const file of plan.pending) {
           await this.store.upsertFile({
@@ -141,15 +192,30 @@ export class SyncEngine {
             });
           }
         }
-      }
 
-      await this.store.pruneFilesExcept(activeKeys);
-
-      if (config.pcloud.accessToken && !this.stopRequested) {
-        const uploadResult = await this.processPending(config, { resetStop: false });
-        result.uploaded += uploadResult.uploaded;
-        result.failed += uploadResult.failed;
-        result.stopped = uploadResult.stopped;
+        if (config.pcloud.accessToken && !this.stopRequested) {
+          const uploadResult = await this.processPending(config, { resetStop: false, taskId: source.id });
+          result.uploaded += uploadResult.uploaded;
+          result.failed += uploadResult.failed;
+          result.stopped = Number(result.stopped || 0) + Number(uploadResult.stopped || 0);
+          Object.assign(taskResult, {
+            uploaded: uploadResult.uploaded,
+            failed: taskResult.failed + uploadResult.failed,
+            stopped: uploadResult.stopped ?? 0
+          });
+        }
+        Object.assign(taskResult, {
+          status: this.stopRequested || taskResult.stopped > 0
+            ? 'stopped'
+            : taskResult.failed > 0
+              ? 'failed'
+              : taskResult.queued > taskResult.uploaded
+                ? 'pending'
+                : 'completed',
+          finishedAt: new Date().toISOString()
+        });
+        result.taskResults.push(structuredClone(taskResult));
+        rememberIntervalRun(this.scheduleSlots, source, config.sync, new Date());
       }
 
       this.lastRunAt = new Date().toISOString();
@@ -160,8 +226,26 @@ export class SyncEngine {
       await this.store.addEvent('scan_failed', 'sync', error.message);
       throw error;
     } finally {
+      this.currentTaskId = '';
+      this.currentTaskName = '';
       this.running = false;
     }
+  }
+
+  async runDueTasks(now = new Date()) {
+    const config = normalizeConfig(await this.store.loadConfig() ?? {});
+    const dueTasks = config.tasks.filter((task) => task.enabled && taskIsDue(task, config.sync, now, this.scheduleSlots));
+    if (dueTasks.length === 0) {
+      return 0;
+    }
+    const scanResult = await this.scanNow({ taskIds: dueTasks.map((task) => task.id), trigger: 'schedule' });
+    if (scanResult?.skipped) {
+      return 0;
+    }
+    for (const task of dueTasks) {
+      rememberTaskScheduleSlot(this.scheduleSlots, task, config.sync, now);
+    }
+    return dueTasks.length;
   }
 
   async retryFailed() {
@@ -198,8 +282,9 @@ export class SyncEngine {
       return { uploaded: 0, failed: 0, stopped: 0 };
     }
 
-    const pending = await this.store.listFiles({ status: 'pending' });
-    const uploading = await this.store.listFiles({ status: 'uploading' });
+    const filter = options.taskId ? { sourceId: options.taskId } : {};
+    const pending = await this.store.listFiles({ ...filter, status: 'pending' });
+    const uploading = await this.store.listFiles({ ...filter, status: 'uploading' });
     const processable = dedupeByKey([...pending, ...uploading]);
     const client = await this.prepareUploadClient(this.pcloudFactory(normalized));
     let uploaded = 0;
@@ -389,6 +474,82 @@ function joinRemote(...parts) {
     .filter(Boolean)
     .join('/');
   return `/${joined}`;
+}
+
+function normalizeTaskIds(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  if (value) {
+    return [String(value).trim()].filter(Boolean);
+  }
+  return [];
+}
+
+function taskIsDue(task, sync, now, slots) {
+  const schedule = effectiveSchedule(task, sync);
+  if (schedule.type === 'manual') {
+    return false;
+  }
+  if (schedule.type === 'interval') {
+    const last = slots.get(task.id);
+    const intervalMs = Number(schedule.intervalSeconds || sync.intervalSeconds || 300) * 1000;
+    return !last?.at || now.getTime() - Number(last.at) >= intervalMs;
+  }
+  const slot = scheduleSlot(schedule, now);
+  return Boolean(slot) && slots.get(task.id)?.slot !== slot;
+}
+
+function rememberTaskScheduleSlot(slots, task, sync, now) {
+  const schedule = effectiveSchedule(task, sync);
+  if (schedule.type === 'manual') {
+    return;
+  }
+  slots.set(task.id, {
+    slot: schedule.type === 'interval' ? `interval:${Math.floor(now.getTime() / 1000)}` : scheduleSlot(schedule, now),
+    at: now.getTime()
+  });
+}
+
+function rememberIntervalRun(slots, task, sync, now) {
+  const schedule = effectiveSchedule(task, sync);
+  if (schedule.type === 'interval') {
+    rememberTaskScheduleSlot(slots, task, sync, now);
+  }
+}
+
+function effectiveSchedule(task, sync) {
+  return task.schedule ?? {
+    type: 'interval',
+    intervalSeconds: Number(sync.intervalSeconds || 300)
+  };
+}
+
+function scheduleSlot(schedule, now) {
+  const time = String(schedule.time || '').trim();
+  if (!timeMatches(time, now)) {
+    return '';
+  }
+  if (schedule.type === 'weekly') {
+    const weekdays = Array.isArray(schedule.weekdays) ? schedule.weekdays : [];
+    if (!weekdays.includes(now.getDay())) {
+      return '';
+    }
+  }
+  return `${schedule.type}:${dateKey(now)}:${time}`;
+}
+
+function timeMatches(time, now) {
+  const hour = String(now.getHours()).padStart(2, '0');
+  const minute = String(now.getMinutes()).padStart(2, '0');
+  return time === `${hour}:${minute}`;
+}
+
+function dateKey(now) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function remoteFolderForFile(_config, file) {

@@ -64,15 +64,21 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
 
   if (request.method === 'GET' && url.pathname === '/api/status') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
+    const engineStatus = engine.getStatus?.() ?? {};
     return json({
       version: APP_VERSION,
       tasks: config.tasks,
+      taskStats: await Promise.all(config.tasks.map(async (task) => ({
+        id: task.id,
+        name: task.name,
+        stats: await store.stats({ sourceId: task.id })
+      }))),
       stats: await store.stats(),
       failed: await store.listFiles({ status: 'failed' }),
       pending: await store.listFiles({ status: 'pending' }),
       uploading: await store.listFiles({ status: 'uploading' }),
       events: await store.listEvents(200),
-      engine: engine.getStatus?.() ?? {}
+      engine: engineStatus
     });
   }
 
@@ -129,7 +135,11 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
   }
 
   if (request.method === 'POST' && url.pathname === '/api/scan') {
-    return json(await engine.scanNow());
+    const body = await readJsonBody(request);
+    const taskIds = Array.isArray(body.taskIds)
+      ? body.taskIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : body.taskId ? [String(body.taskId).trim()].filter(Boolean) : [];
+    return json(await engine.scanNow({ taskIds, trigger: 'manual' }));
   }
 
   if (request.method === 'POST' && url.pathname === '/api/stop') {
@@ -216,6 +226,14 @@ function mergeConfig(previous, patch) {
     tasks: hasTasksPatch ? patch.tasks : previous.tasks ?? [],
     sources: Object.hasOwn(patch, 'sources') ? patch.sources : hasTasksPatch ? [] : previous.sources ?? []
   };
+}
+
+async function readJsonBody(request) {
+  try {
+    return await request.json();
+  } catch {
+    return {};
+  }
 }
 
 function json(body, status = 200) {

@@ -56,6 +56,23 @@ test('task metrics include a separate existing-file count', async () => {
   assert.match(script, /stats\.existing/);
 });
 
+test('web UI exposes current-task metrics and task schedule controls', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="metricScope"/);
+  assert.match(script, /currentTaskId/);
+  assert.match(script, /taskStats/);
+  assert.match(script, /task-stat-grid/);
+  assert.match(script, /scheduleType/);
+  assert.match(script, /scheduleTime/);
+  assert.match(script, /scheduleWeekdays/);
+  assert.match(script, /每天/);
+  assert.match(script, /每周/);
+});
+
 test('web UI exposes stop sync and opens pCloud picker from the selected folder or root', async () => {
   const [html, script] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),

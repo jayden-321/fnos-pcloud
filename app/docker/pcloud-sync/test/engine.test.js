@@ -67,6 +67,88 @@ test('SyncEngine uploads pending files and records pCloud file ids', async () =>
   assert.equal(calls[0][1], '/NAS/Docs');
 });
 
+test('SyncEngine runs task scan and upload jobs sequentially by task', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const firstDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-first-'));
+  const secondDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-second-'));
+  await writeFile(path.join(firstDir, 'a.txt'), 'first');
+  await writeFile(path.join(secondDir, 'b.txt'), 'second');
+  const calls = [];
+
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    sync: { concurrency: 1 },
+    tasks: [
+      { id: 'first', name: 'First', localPath: firstDir, remotePath: '/Sync/first', enabled: true },
+      { id: 'second', name: 'Second', localPath: secondDir, remotePath: '/Sync/second', enabled: true }
+    ]
+  }));
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      listRemoteFiles: async (remotePath) => {
+        calls.push(`scan:${remotePath}`);
+        return new Map();
+      },
+      ensureFolder: async (remotePath) => {
+        calls.push(`ensure:${remotePath}`);
+        return { folderid: remotePath.endsWith('first') ? 1 : 2 };
+      },
+      uploadFile: async (payload) => {
+        calls.push(`upload:${payload.filename}`);
+        return { fileids: [payload.folderid], metadata: [{ fileid: payload.folderid, name: payload.filename }] };
+      }
+    })
+  });
+
+  const result = await engine.scanNow();
+  const files = await store.listFiles();
+
+  assert.deepEqual(calls, [
+    'scan:/Sync/first',
+    'ensure:/Sync/first',
+    'upload:a.txt',
+    'scan:/Sync/second',
+    'ensure:/Sync/second',
+    'upload:b.txt'
+  ]);
+  assert.deepEqual(result.taskResults.map((task) => [task.id, task.status, task.uploaded]), [
+    ['first', 'completed', 1],
+    ['second', 'completed', 1]
+  ]);
+  assert.deepEqual(files.map((file) => file.sourceId).sort(), ['first', 'second']);
+});
+
+test('SyncEngine scheduled runner queues only due tasks once per schedule slot', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    tasks: [
+      { id: 'manual', name: 'Manual', localPath: '/vol1/manual', remotePath: '/Sync/manual', schedule: { type: 'manual' } },
+      { id: 'daily', name: 'Daily', localPath: '/vol1/daily', remotePath: '/Sync/daily', schedule: { type: 'daily', time: '09:30' } },
+      { id: 'weekly', name: 'Weekly', localPath: '/vol1/weekly', remotePath: '/Sync/weekly', schedule: { type: 'weekly', time: '09:30', weekdays: [1] } },
+      { id: 'later', name: 'Later', localPath: '/vol1/later', remotePath: '/Sync/later', schedule: { type: 'daily', time: '10:00' } }
+    ]
+  }));
+
+  const engine = new SyncEngine({ store });
+  const calls = [];
+  engine.scanNow = async (options) => {
+    calls.push(options);
+    return { taskResults: [] };
+  };
+  const monday = new Date(2026, 5, 29, 9, 30, 10);
+
+  assert.equal(await engine.runDueTasks(monday), 2);
+  assert.deepEqual(calls[0].taskIds, ['daily', 'weekly']);
+  assert.equal(await engine.runDueTasks(new Date(2026, 5, 29, 9, 30, 40)), 0);
+  assert.equal(calls.length, 1);
+});
+
 test('SyncEngine recovers stale uploading files on the next scan', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));

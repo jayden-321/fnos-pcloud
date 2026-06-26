@@ -202,12 +202,16 @@ async function saveConfig() {
 async function refreshStatus() {
   currentStatus = await get('/api/status');
   setText('appVersion', currentStatus.version ? `v${currentStatus.version}` : '');
-  setText('statTotal', currentStatus.stats.total);
-  setText('statSynced', currentStatus.stats.synced);
-  setText('statExisting', currentStatus.stats.existing || 0);
-  setText('statFailed', currentStatus.stats.failed);
-  setText('statPending', currentStatus.stats.pending);
-  setText('statUploading', currentStatus.stats.uploading);
+  const activeTaskId = currentStatus.engine?.currentTaskId || '';
+  const activeTaskStats = activeTaskId ? taskStatsById().get(activeTaskId) : null;
+  const displayedStats = activeTaskStats?.stats || currentStatus.stats;
+  setText('metricScope', activeTaskStats ? `当前任务：${activeTaskStats.name}` : '全部任务');
+  setText('statTotal', displayedStats.total);
+  setText('statSynced', displayedStats.synced);
+  setText('statExisting', displayedStats.existing || 0);
+  setText('statFailed', displayedStats.failed);
+  setText('statPending', displayedStats.pending);
+  setText('statUploading', displayedStats.uploading);
   setText('statSpeed', formatBytesPerSecond(currentStatus.engine?.uploadSpeedBytesPerSecond || 0));
   document.querySelector('#stopSync').disabled = !currentStatus.engine?.active && !currentStatus.stats.uploading;
   currentEvents = currentStatus.events || [];
@@ -239,15 +243,27 @@ function showTab(tab) {
 
 function renderTaskCards() {
   const tasks = currentStatus?.tasks || currentConfig?.tasks || [];
+  const statsByTask = taskStatsById();
+  const queueByTask = new Map((currentStatus?.engine?.taskQueue || []).map((task) => [task.id, task]));
   taskCards.innerHTML = tasks.map((task) => {
     const counts = taskQueueCounts(task.id);
-    const status = counts.failed > 0 ? '同步异常' : counts.pending + counts.uploading > 0 ? '等待同步' : '同步完成';
+    const queue = queueByTask.get(task.id);
+    const stats = statsByTask.get(task.id)?.stats || emptyStats();
+    const status = queueStatusText(queue?.status)
+      || (counts.failed > 0 ? '同步异常' : counts.pending + counts.uploading > 0 ? '等待同步' : '同步完成');
     return `
       <article class="task-card">
         <div class="task-card-main">
           <div class="task-card-copy">
             <h3>${escapeHtml(task.name)}</h3>
             <p class="${counts.failed > 0 ? 'danger' : 'success'}">${escapeHtml(status)}</p>
+            <div class="task-stat-grid">
+              <span>总 ${formatNumber(stats.total)}</span>
+              <span>已存在 ${formatNumber(stats.existing || 0)}</span>
+              <span>已成功 ${formatNumber(stats.synced)}</span>
+              <span>待上传 ${formatNumber(stats.pending)}</span>
+              <span>失败 ${formatNumber(stats.failed)}</span>
+            </div>
           </div>
           <div class="task-card-actions">
             <button type="button" data-tab="logs">查看日志</button>
@@ -287,6 +303,8 @@ function renderTaskEditors(tasks) {
 
 function addTaskEditor(task = {}) {
   const index = taskEditors.children.length;
+  const schedule = scheduleFromTask(task);
+  const weekdays = new Set(schedule.weekdays || []);
   const editor = document.createElement('section');
   editor.className = 'task-editor';
   editor.dataset.index = String(index);
@@ -316,6 +334,31 @@ function addTaskEditor(task = {}) {
         <button data-action="pick-remote" type="button">选择</button>
       </div>
     </label>
+    <div class="schedule-grid">
+      <label>
+        定时方式
+        <select name="scheduleType">
+          <option value="interval" ${schedule.type === 'interval' ? 'selected' : ''}>按间隔</option>
+          <option value="daily" ${schedule.type === 'daily' ? 'selected' : ''}>每天</option>
+          <option value="weekly" ${schedule.type === 'weekly' ? 'selected' : ''}>每周</option>
+          <option value="manual" ${schedule.type === 'manual' ? 'selected' : ''}>手动</option>
+        </select>
+      </label>
+      <label>
+        间隔秒
+        <input name="scheduleIntervalSeconds" type="number" min="30" step="30" value="${escapeHtml(String(schedule.intervalSeconds || currentConfig?.sync?.intervalSeconds || 300))}">
+      </label>
+      <label>
+        时间
+        <input name="scheduleTime" type="time" value="${escapeHtml(schedule.time || '00:00')}">
+      </label>
+      <label class="weekday-row">
+        每周
+        <span class="weekday-options">
+          ${weekdayInputs(weekdays)}
+        </span>
+      </label>
+    </div>
     <input name="id" type="hidden" value="${escapeHtml(task.id || '')}">
   `;
   taskEditors.append(editor);
@@ -329,9 +372,97 @@ function collectTaskEditors() {
       localPath: editor.querySelector('[name="localPath"]').value.trim(),
       remotePath: editor.querySelector('[name="remotePath"]').value.trim(),
       enabled: editor.querySelector('[name="enabled"]').checked,
-      mode: 'upload'
+      mode: 'upload',
+      schedule: collectSchedule(editor)
     }))
     .filter((task) => task.name || task.localPath || task.remotePath);
+}
+
+function taskStatsById() {
+  return new Map((currentStatus?.taskStats || []).map((task) => [task.id, task]));
+}
+
+function emptyStats() {
+  return {
+    total: 0,
+    synced: 0,
+    existing: 0,
+    failed: 0,
+    pending: 0,
+    uploading: 0
+  };
+}
+
+function queueStatusText(status) {
+  return {
+    queued: '排队中',
+    running: '同步中',
+    pending: '等待同步',
+    completed: '同步完成',
+    failed: '同步异常',
+    stopped: '已停止'
+  }[status] || '';
+}
+
+function scheduleFromTask(task) {
+  const schedule = task.schedule || {};
+  if (['manual', 'daily', 'weekly', 'interval'].includes(schedule.type)) {
+    return {
+      type: schedule.type,
+      intervalSeconds: Number(schedule.intervalSeconds || currentConfig?.sync?.intervalSeconds || 300),
+      time: schedule.time || '00:00',
+      weekdays: Array.isArray(schedule.weekdays) ? schedule.weekdays : [1]
+    };
+  }
+  return {
+    type: 'interval',
+    intervalSeconds: Number(currentConfig?.sync?.intervalSeconds || 300),
+    time: '00:00',
+    weekdays: [1]
+  };
+}
+
+function collectSchedule(editor) {
+  const type = editor.querySelector('[name="scheduleType"]').value;
+  if (type === 'manual') {
+    return { type: 'manual' };
+  }
+  if (type === 'daily') {
+    return { type: 'daily', time: editor.querySelector('[name="scheduleTime"]').value || '00:00' };
+  }
+  if (type === 'weekly') {
+    return {
+      type: 'weekly',
+      time: editor.querySelector('[name="scheduleTime"]').value || '00:00',
+      weekdays: [...editor.querySelectorAll('[name="scheduleWeekdays"]:checked')].map((input) => Number(input.value))
+    };
+  }
+  return {
+    type: 'interval',
+    intervalSeconds: Number(editor.querySelector('[name="scheduleIntervalSeconds"]').value || currentConfig?.sync?.intervalSeconds || 300)
+  };
+}
+
+function weekdayInputs(selected) {
+  const labels = [
+    ['1', '一'],
+    ['2', '二'],
+    ['3', '三'],
+    ['4', '四'],
+    ['5', '五'],
+    ['6', '六'],
+    ['0', '日']
+  ];
+  return labels.map(([value, label]) => `
+    <label>
+      <input name="scheduleWeekdays" type="checkbox" value="${value}" ${selected.has(Number(value)) ? 'checked' : ''}>
+      ${label}
+    </label>
+  `).join('');
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat('zh-CN').format(Number(value || 0));
 }
 
 function renumberTaskEditors() {

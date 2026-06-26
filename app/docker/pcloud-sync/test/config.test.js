@@ -140,6 +140,40 @@ test('normalizeConfig accepts explicit multi-task definitions', () => {
   ]);
 });
 
+test('normalizeConfig accepts task-level schedules', () => {
+  const config = normalizeConfig({
+    tasks: [
+      {
+        id: 'daily',
+        name: 'Daily',
+        localPath: '/vol1/daily',
+        remotePath: '/Sync/daily',
+        schedule: { type: 'daily', time: '02:30' }
+      },
+      {
+        id: 'weekly',
+        name: 'Weekly',
+        localPath: '/vol1/weekly',
+        remotePath: '/Sync/weekly',
+        schedule: { type: 'weekly', time: '23:45', weekdays: [1, 5, 9, 'bad'] }
+      },
+      {
+        id: 'manual',
+        name: 'Manual',
+        localPath: '/vol1/manual',
+        remotePath: '/Sync/manual',
+        schedule: { type: 'manual' }
+      }
+    ]
+  });
+
+  assert.deepEqual(config.tasks.map((task) => task.schedule), [
+    { type: 'daily', time: '02:30' },
+    { type: 'weekly', time: '23:45', weekdays: [1, 5] },
+    { type: 'manual' }
+  ]);
+});
+
 test('normalizeConfig treats an explicit empty task list as deleted tasks', () => {
   const config = normalizeConfig({
     pcloud: { remoteRoot: '/NAS' },

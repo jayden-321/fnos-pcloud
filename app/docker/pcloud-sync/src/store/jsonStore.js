@@ -63,6 +63,9 @@ export class JsonStore {
     if (filter.status) {
       files = files.filter((file) => file.status === filter.status);
     }
+    if (filter.sourceId) {
+      files = files.filter((file) => fileMatchesSource(file, filter.sourceId));
+    }
     return structuredClone(files.sort((a, b) => String(a.key).localeCompare(String(b.key))));
   }
 
@@ -135,9 +138,20 @@ export class JsonStore {
     return count;
   }
 
-  async clearFiles() {
-    const count = Object.keys(this.state.files).length;
-    this.state.files = {};
+  async clearFiles(filter = {}) {
+    const sourceIds = Array.isArray(filter.sourceIds) ? filter.sourceIds.filter(Boolean) : null;
+    let count = 0;
+    if (sourceIds?.length) {
+      for (const key of Object.keys(this.state.files)) {
+        if (sourceIds.some((sourceId) => fileMatchesSource(this.state.files[key], sourceId))) {
+          delete this.state.files[key];
+          count += 1;
+        }
+      }
+    } else {
+      count = Object.keys(this.state.files).length;
+      this.state.files = {};
+    }
     if (count > 0) {
       await this.#save();
     }
@@ -179,7 +193,11 @@ export class JsonStore {
     return deleted;
   }
 
-  async stats() {
+  async stats(filter = {}) {
+    let files = Object.values(this.state.files);
+    if (filter.sourceId) {
+      files = files.filter((file) => fileMatchesSource(file, filter.sourceId));
+    }
     const stats = {
       total: 0,
       synced: 0,
@@ -190,7 +208,7 @@ export class JsonStore {
       bytesSynced: 0
     };
 
-    for (const file of Object.values(this.state.files)) {
+    for (const file of files) {
       stats.total += 1;
       if (file.status === 'synced') {
         stats.synced += 1;
@@ -243,6 +261,11 @@ export class JsonStore {
       throw error;
     }
   }
+}
+
+function fileMatchesSource(file, sourceId) {
+  const value = String(sourceId || '');
+  return file?.sourceId === value || String(file?.key || '').startsWith(`${value}/`);
 }
 
 function clampInteger(value, fallback, min, max) {

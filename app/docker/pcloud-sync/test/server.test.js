@@ -32,7 +32,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.2.6');
+  assert.equal(status.version, '0.2.7');
   assert.equal(status.stats.failed, 1);
   assert.equal(status.stats.existing, 1);
   assert.deepEqual(status.tasks, []);
@@ -41,6 +41,71 @@ test('HTTP API returns redacted config and aggregate status', async () => {
   assert.match(pageText, /id="eventSearch"/);
   assert.match(pageText, /data-tab="tasks"/);
   assert.match(pageText, /id="createTask"/);
+});
+
+test('HTTP API returns per-task stats and engine task queue state', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-task-stats-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  await store.saveConfig({
+    port: 8080,
+    pcloud: { accessToken: 'secret', hostname: 'api.pcloud.com', remoteRoot: '/' },
+    sync: { intervalSeconds: 300, concurrency: 2, ignorePatterns: [] },
+    tasks: [
+      { id: 'docs', name: 'Docs', localPath: '/vol1/docs', remotePath: '/Sync/docs', enabled: true },
+      { id: 'pics', name: 'Pics', localPath: '/vol1/pics', remotePath: '/Sync/pics', enabled: true }
+    ]
+  });
+  await store.upsertFile({ key: 'docs/a.txt', sourceId: 'docs', status: 'synced', size: 10 });
+  await store.upsertFile({ key: 'docs/b.txt', sourceId: 'docs', status: 'existing', size: 20 });
+  await store.upsertFile({ key: 'pics/a.jpg', sourceId: 'pics', status: 'pending', size: 30 });
+
+  const app = createApp({
+    store,
+    engine: {
+      getStatus: () => ({
+        currentTaskId: 'pics',
+        currentTaskName: 'Pics',
+        taskQueue: [
+          { id: 'docs', name: 'Docs', status: 'completed' },
+          { id: 'pics', name: 'Pics', status: 'running' }
+        ]
+      })
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/status'));
+  const status = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(status.engine.currentTaskId, 'pics');
+  assert.deepEqual(status.taskStats.map((task) => [task.id, task.stats.total, task.stats.synced, task.stats.existing, task.stats.pending]), [
+    ['docs', 2, 1, 1, 0],
+    ['pics', 1, 0, 0, 1]
+  ]);
+});
+
+test('HTTP API passes a requested task id to manual scans', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-scan-task-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  let scanOptions = null;
+
+  const app = createApp({
+    store,
+    engine: {
+      scanNow: async (options) => {
+        scanOptions = options;
+        return { queued: 0 };
+      }
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/scan', {
+    method: 'POST',
+    body: JSON.stringify({ taskId: 'docs' })
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(scanOptions, { taskIds: ['docs'], trigger: 'manual' });
 });
 
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {
