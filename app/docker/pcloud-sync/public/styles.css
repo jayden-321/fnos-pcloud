@@ -58,6 +58,15 @@ button:hover {
   background: var(--accent-strong);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+button:disabled:hover {
+  background: var(--accent);
+}
+
 .sidebar {
   position: sticky;
   top: 0;

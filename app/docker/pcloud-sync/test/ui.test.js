@@ -27,6 +27,7 @@ test('settings prioritizes task config and exposes log retention controls', asyn
 
   assert.ok(html.indexOf('任务配置') < html.indexOf('pCloud 授权'));
   assert.ok(html.indexOf('pCloud 授权') < html.indexOf('同步规则'));
+  assert.doesNotMatch(html, /默认 pCloud 根目录|name="remoteRoot"/);
   assert.match(html, /name="logRetentionDays"/);
   assert.match(html, /name="logRetentionCount"/);
   assert.match(html, /id="clearEvents"/);
@@ -41,4 +42,17 @@ test('sync logs expose file size, progress, and uploading status filters', async
   assert.match(html, /<th>进度<\/th>/);
   assert.match(html, /<option value="uploading">上传中<\/option>/);
   assert.match(script, /uploadToLogRow/);
+});
+
+test('web UI exposes stop sync and opens pCloud picker from the selected folder or root', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="stopSync"/);
+  assert.match(script, /\/api\/stop/);
+  assert.doesNotMatch(script, /fields\.remoteRoot|remoteRoot:|name="remoteRoot"/);
+  assert.match(script, /initialPath: editor\.querySelector\('\[name="remotePath"\]'\)\.value/);
+  assert.match(script, /\/api\/pcloud\/folders\?path=\$\{encodeURIComponent\(targetPath \|\| '\/'\)\}/);
 });

@@ -11,7 +11,7 @@ test('normalizeConfig supplies safe defaults for first run', () => {
   assert.equal(config.sync.logRetentionDays, 30);
   assert.equal(config.sync.logRetentionCount, 300);
   assert.equal(config.pcloud.hostname, 'api.pcloud.com');
-  assert.equal(config.pcloud.remoteRoot, '/NAS-Backup');
+  assert.equal(config.pcloud.remoteRoot, '/');
   assert.deepEqual(config.tasks, []);
   assert.deepEqual(config.sources, []);
 });
@@ -73,7 +73,7 @@ test('normalizeConfig preserves non-ASCII source names for remote folders', () =
       name: '财务',
       enabled: true,
       localPath: '/vol1/财务',
-      remotePath: '/NAS-Backup/财务',
+      remotePath: '/财务',
       mode: 'upload'
     }
   ]);
@@ -92,7 +92,7 @@ test('normalizeConfig migrates legacy dashed names generated from non-ASCII path
       name: '财务',
       enabled: true,
       localPath: '/vol1/财务',
-      remotePath: '/NAS-Backup/财务',
+      remotePath: '/财务',
       mode: 'upload'
     }
   ]);

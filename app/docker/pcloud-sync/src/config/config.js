@@ -5,7 +5,7 @@ const DEFAULT_CONFIG = {
     clientId: '',
     clientSecret: '',
     accessToken: '',
-    remoteRoot: '/NAS-Backup'
+    remoteRoot: '/'
   },
   sync: {
     intervalSeconds: 300,
@@ -145,7 +145,7 @@ function normalizeTasks(input, legacySources, remoteRoot) {
       name,
       enabled: item?.enabled !== false,
       localPath,
-      remotePath: cleanRemoteRoot(item?.remotePath || joinRemote(remoteRoot, item?.remoteName || fallbackName)),
+      remotePath: cleanRemoteRoot(item?.remotePath || joinRemote(item?.remoteName || fallbackName)),
       mode: 'upload'
     });
   }

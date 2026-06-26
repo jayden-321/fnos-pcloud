@@ -85,7 +85,7 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
   if (request.method === 'GET' && url.pathname === '/api/pcloud/folders') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
-    return json(await client.listRemoteFolders(url.searchParams.get('path') || config.pcloud.remoteRoot));
+    return json(await client.listRemoteFolders(url.searchParams.get('path') || '/'));
   }
 
   if (request.method === 'GET' && url.pathname === '/api/pcloud/current-server') {
@@ -130,6 +130,13 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
 
   if (request.method === 'POST' && url.pathname === '/api/scan') {
     return json(await engine.scanNow());
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/stop') {
+    if (!engine.requestStop) {
+      return json({ stopping: false, activeUploads: 0 });
+    }
+    return json(await engine.requestStop());
   }
 
   if (request.method === 'POST' && url.pathname === '/api/retry-failed') {

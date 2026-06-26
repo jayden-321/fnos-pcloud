@@ -15,12 +15,14 @@ export class SyncEngine {
     this.lastRunAt = null;
     this.lastError = '';
     this.activeUploads = new Map();
+    this.stopRequested = false;
   }
 
   getStatus() {
     return {
       running: Boolean(this.timer),
       active: this.running,
+      stopping: this.stopRequested && (this.running || this.activeUploads.size > 0),
       lastRunAt: this.lastRunAt,
       lastError: this.lastError,
       uploadSpeedBytesPerSecond: this.uploadSpeedBytesPerSecond(),
@@ -58,6 +60,7 @@ export class SyncEngine {
       return { skipped: true, reason: 'scan already running' };
     }
     this.running = true;
+    this.stopRequested = false;
     this.lastError = '';
 
     try {
@@ -76,6 +79,9 @@ export class SyncEngine {
       };
 
       for (const source of config.tasks.filter((item) => item.enabled)) {
+        if (this.stopRequested) {
+          break;
+        }
         let discovered = [];
         try {
           discovered = await scanSource(source, config.sync.ignorePatterns);
@@ -134,10 +140,11 @@ export class SyncEngine {
 
       await this.store.pruneFilesExcept(activeKeys);
 
-      if (config.pcloud.accessToken) {
-        const uploadResult = await this.processPending(config);
+      if (config.pcloud.accessToken && !this.stopRequested) {
+        const uploadResult = await this.processPending(config, { resetStop: false });
         result.uploaded += uploadResult.uploaded;
         result.failed += uploadResult.failed;
+        result.stopped = uploadResult.stopped;
       }
 
       this.lastRunAt = new Date().toISOString();
@@ -162,10 +169,28 @@ export class SyncEngine {
     return count;
   }
 
-  async processPending(config = null) {
+  async requestStop() {
+    this.stopRequested = true;
+    const activeUploads = this.activeUploads.size;
+    for (const upload of this.activeUploads.values()) {
+      upload.controller?.abort();
+    }
+    if (activeUploads === 0) {
+      await this.store.resetUploading?.();
+    }
+    return {
+      stopping: this.running || activeUploads > 0,
+      activeUploads
+    };
+  }
+
+  async processPending(config = null, options = {}) {
+    if (options.resetStop !== false) {
+      this.stopRequested = false;
+    }
     const normalized = config ?? normalizeConfig(await this.store.loadConfig() ?? {});
     if (!normalized.pcloud.accessToken) {
-      return { uploaded: 0, failed: 0 };
+      return { uploaded: 0, failed: 0, stopped: 0 };
     }
 
     const pending = await this.store.listFiles({ status: 'pending' });
@@ -174,10 +199,15 @@ export class SyncEngine {
     const client = await this.prepareUploadClient(this.pcloudFactory(normalized));
     let uploaded = 0;
     let failed = 0;
+    let stopped = 0;
 
     await runLimited(processable, normalized.sync.concurrency, async (file) => {
+      if (this.stopRequested) {
+        return;
+      }
       try {
         await this.store.setStatus(file.key, 'uploading');
+        const controller = new AbortController();
         this.activeUploads.set(file.key, {
           bytes: 0,
           total: Number(file.size || 0),
@@ -186,7 +216,8 @@ export class SyncEngine {
           speed: 0,
           hasProgressSample: false,
           startedAt: Date.now(),
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          controller
         });
         const progressHash = progressHashForFile(file);
         const stopProgressPolling = this.startUploadProgressPolling(client, file.key, progressHash);
@@ -199,7 +230,8 @@ export class SyncEngine {
             filename: path.posix.basename(file.relativePath),
             folderid: folder.folderid,
             mtime: file.mtime,
-            progressHash
+            progressHash,
+            signal: controller.signal
           });
         } finally {
           stopProgressPolling();
@@ -214,6 +246,14 @@ export class SyncEngine {
         await this.store.addEvent('upload_succeeded', file.key, pcloudPath, { size: Number(file.size || 0) });
         uploaded += 1;
       } catch (error) {
+        if (this.stopRequested || isStopError(error)) {
+          await this.store.setStatus(file.key, 'pending', {
+            error: 'Stopped'
+          });
+          await this.store.addEvent('upload_stopped', file.key, 'Stopped', { size: Number(file.size || 0) });
+          stopped += 1;
+          return;
+        }
         await this.store.setStatus(file.key, 'failed', {
           error: error.message,
           retryCount: Number(file.retryCount || 0) + 1
@@ -225,7 +265,7 @@ export class SyncEngine {
       }
     });
 
-    return { uploaded, failed };
+    return { uploaded, failed, stopped };
   }
 
   recordUploadProgress(key, chunkBytes, totalBytes = 0) {
@@ -346,14 +386,9 @@ function joinRemote(...parts) {
   return `/${joined}`;
 }
 
-function remoteFolderForFile(config, file) {
+function remoteFolderForFile(_config, file) {
   const remotePath = joinRemote(file.remotePath || '');
-  const folder = path.posix.dirname(remotePath);
-  const root = joinRemote(config.pcloud.remoteRoot || '/');
-  if (folder === root || folder.startsWith(`${root}/`) || root === '/') {
-    return folder;
-  }
-  return joinRemote(root, folder);
+  return path.posix.dirname(remotePath);
 }
 
 async function runLimited(items, limit, worker) {
@@ -365,6 +400,10 @@ async function runLimited(items, limit, worker) {
     }
   });
   await Promise.all(workers);
+}
+
+function isStopError(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR' || /upload stopped/i.test(error?.message || '');
 }
 
 function dedupeByKey(files) {

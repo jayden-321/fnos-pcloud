@@ -31,7 +31,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.2.3');
+  assert.equal(status.version, '0.2.4');
   assert.equal(status.stats.failed, 1);
   assert.deepEqual(status.tasks, []);
   assert.deepEqual(status.uploading.map((file) => file.key), ['b.txt']);
@@ -70,6 +70,28 @@ test('HTTP API drains the pending queue after retrying failed or stuck files', a
   assert.deepEqual(body, { queued: 1, uploaded: 1, failed: 0 });
 });
 
+test('HTTP API requests the engine to stop the active sync', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  let stopRequested = false;
+
+  const app = createApp({
+    store,
+    engine: {
+      requestStop: async () => {
+        stopRequested = true;
+        return { stopping: true, activeUploads: 1 };
+      }
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/stop', { method: 'POST' }));
+
+  assert.equal(response.status, 200);
+  assert.equal(stopRequested, true);
+  assert.deepEqual(await response.json(), { stopping: true, activeUploads: 1 });
+});
+
 test('HTTP API keeps saved token masks and allows deleting all tasks', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
   const store = new JsonStore(dir);
@@ -86,7 +108,7 @@ test('HTTP API keeps saved token masks and allows deleting all tasks', async () 
   const response = await app.fetch(new Request('http://local/api/config', {
     method: 'POST',
     body: JSON.stringify({
-      pcloud: { hostname: 'api.pcloud.com', remoteRoot: '/NAS', accessToken: '******' },
+      pcloud: { hostname: 'api.pcloud.com', accessToken: '******' },
       tasks: []
     })
   }));
@@ -173,7 +195,11 @@ test('HTTP API lists and creates remote pCloud folders', async () => {
     pcloudFactory: () => ({
       listRemoteFolders: async (remotePath) => {
         calls.push(['list', remotePath]);
-        return { path: remotePath, parent: '/', entries: [{ name: '财务', path: `${remotePath}/财务`, folderid: 7 }] };
+        return {
+          path: remotePath,
+          parent: '/',
+          entries: [{ name: '财务', path: remotePath === '/' ? '/财务' : `${remotePath}/财务`, folderid: 7 }]
+        };
       },
       ensureFolder: async (remotePath) => {
         calls.push(['create', remotePath]);
@@ -182,14 +208,16 @@ test('HTTP API lists and creates remote pCloud folders', async () => {
     })
   });
   const listResponse = await app.fetch(new Request('http://local/api/pcloud/folders?path=/NAS'));
+  const rootListResponse = await app.fetch(new Request('http://local/api/pcloud/folders'));
   const createResponse = await app.fetch(new Request('http://local/api/pcloud/folders', {
     method: 'POST',
     body: JSON.stringify({ path: '/NAS/New' })
   }));
 
   assert.deepEqual(await listResponse.json(), { path: '/NAS', parent: '/', entries: [{ name: '财务', path: '/NAS/财务', folderid: 7 }] });
+  assert.deepEqual(await rootListResponse.json(), { path: '/', parent: '/', entries: [{ name: '财务', path: '/财务', folderid: 7 }] });
   assert.deepEqual(await createResponse.json(), { folderid: 8, path: '/NAS/New' });
-  assert.deepEqual(calls, [['list', '/NAS'], ['create', '/NAS/New']]);
+  assert.deepEqual(calls, [['list', '/NAS'], ['list', '/'], ['create', '/NAS/New']]);
 });
 
 test('HTTP API exposes pCloud progress, checksum, diff, and server APIs', async () => {

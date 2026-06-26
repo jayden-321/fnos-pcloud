@@ -24,6 +24,7 @@
         </div>
         <div class="actions">
           <button id="scanNow" type="button">立即扫描</button>
+          <button id="stopSync" type="button" disabled>停止同步</button>
           <button id="retryFailed" type="button">重试失败</button>
         </div>
       </header>
@@ -128,10 +129,6 @@
             <label>
               Access Token
               <input name="accessToken" type="password" autocomplete="off" placeholder="已保存时可留空">
-            </label>
-            <label>
-              默认 pCloud 根目录
-              <input name="remoteRoot" placeholder="/NAS-Backup">
             </label>
           </section>
 

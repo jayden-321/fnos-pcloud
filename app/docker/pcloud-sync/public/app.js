@@ -17,7 +17,6 @@ const fields = {
   clientSecret: form.elements.clientSecret,
   oauthCode: form.elements.oauthCode,
   accessToken: form.elements.accessToken,
-  remoteRoot: form.elements.remoteRoot,
   intervalSeconds: form.elements.intervalSeconds,
   concurrency: form.elements.concurrency,
   logRetentionDays: form.elements.logRetentionDays,
@@ -58,6 +57,12 @@ document.querySelector('#scanNow').addEventListener('click', async () => {
   await post('/api/scan', {});
   await refreshStatus();
   show('扫描已触发');
+});
+
+document.querySelector('#stopSync').addEventListener('click', async () => {
+  const result = await post('/api/stop', {});
+  await refreshStatus();
+  show(result.stopping ? '正在停止同步' : '没有正在运行的同步');
 });
 
 document.querySelector('#retryFailed').addEventListener('click', async () => {
@@ -111,7 +116,7 @@ taskEditors.addEventListener('click', async (event) => {
     await openFolderPicker({ kind: 'local', index, initialPath: editor.querySelector('[name="localPath"]').value });
   }
   if (action === 'pick-remote') {
-    await openFolderPicker({ kind: 'remote', index, initialPath: editor.querySelector('[name="remotePath"]').value || fields.remoteRoot.value });
+    await openFolderPicker({ kind: 'remote', index, initialPath: editor.querySelector('[name="remotePath"]').value });
   }
 });
 
@@ -158,7 +163,6 @@ async function loadConfig() {
   fields.clientId.value = currentConfig.pcloud.clientId || '';
   fields.clientSecret.value = '';
   fields.accessToken.value = currentConfig.pcloud.accessToken ? TOKEN_MASK : '';
-  fields.remoteRoot.value = currentConfig.pcloud.remoteRoot;
   fields.intervalSeconds.value = currentConfig.sync.intervalSeconds;
   fields.concurrency.value = currentConfig.sync.concurrency;
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
@@ -170,8 +174,7 @@ async function loadConfig() {
 async function saveConfig() {
   const pcloud = {
     hostname: fields.hostname.value,
-    clientId: fields.clientId.value.trim(),
-    remoteRoot: fields.remoteRoot.value.trim()
+    clientId: fields.clientId.value.trim()
   };
   if (fields.clientSecret.value.trim()) {
     pcloud.clientSecret = fields.clientSecret.value.trim();
@@ -205,6 +208,7 @@ async function refreshStatus() {
   setText('statPending', currentStatus.stats.pending);
   setText('statUploading', currentStatus.stats.uploading);
   setText('statSpeed', formatBytesPerSecond(currentStatus.engine?.uploadSpeedBytesPerSecond || 0));
+  document.querySelector('#stopSync').disabled = !currentStatus.engine?.active && !currentStatus.stats.uploading;
   currentEvents = currentStatus.events || [];
 
   const rows = [...currentStatus.failed, ...currentStatus.pending, ...(currentStatus.uploading || [])].slice(0, 200);
@@ -307,7 +311,7 @@ function addTaskEditor(task = {}) {
     <label>
       pCloud 文件夹
       <div class="input-action">
-        <input name="remotePath" value="${escapeHtml(task.remotePath || '')}" placeholder="/NAS-Backup/work">
+        <input name="remotePath" value="${escapeHtml(task.remotePath || '')}" placeholder="/Sync/Psync">
         <button data-action="pick-remote" type="button">选择</button>
       </div>
     </label>
@@ -346,7 +350,7 @@ async function openFolderPicker({ kind, index, initialPath }) {
 async function loadFolder(targetPath) {
   const endpoint = folderPicker.kind === 'local'
     ? `/api/local-folders?path=${encodeURIComponent(targetPath || '')}`
-    : `/api/pcloud/folders?path=${encodeURIComponent(targetPath || fields.remoteRoot.value || '/')}`;
+    : `/api/pcloud/folders?path=${encodeURIComponent(targetPath || '/')}`;
   const result = await get(endpoint);
   folderPicker.path = result.path;
   folderPicker.parent = result.parent;

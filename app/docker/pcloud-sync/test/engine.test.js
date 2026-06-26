@@ -159,6 +159,97 @@ test('SyncEngine processes stale uploading files when draining the queue directl
   assert.equal((await store.stats()).uploading, 0);
 });
 
+test('SyncEngine uploads to the task pCloud folder without prefixing the default root', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'direct-root.txt');
+  await writeFile(filePath, 'hello');
+  const folders = [];
+
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token', remoteRoot: '/NAS-Backup' },
+    tasks: [{ id: 'docs', name: 'docs', localPath: sourceDir, remotePath: '/Sync/Psync', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/direct-root.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'direct-root.txt',
+    remotePath: '/Sync/Psync/direct-root.txt',
+    size: 5,
+    status: 'pending'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async (remotePath) => {
+        folders.push(remotePath);
+        return { folderid: 42 };
+      },
+      uploadFile: async () => ({ fileids: [107], metadata: [{ fileid: 107, name: 'direct-root.txt' }] })
+    })
+  });
+
+  const result = await engine.processPending();
+  const files = await store.listFiles();
+
+  assert.equal(result.uploaded, 1);
+  assert.deepEqual(folders, ['/Sync/Psync']);
+  assert.equal(files[0].pcloudPath, '/Sync/Psync/direct-root.txt');
+});
+
+test('SyncEngine stop request aborts active upload and requeues the file', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'stop.txt');
+  await writeFile(filePath, 'hello');
+
+  const store = new JsonStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'docs', localPath: sourceDir, remotePath: '/Sync/Psync', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/stop.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'stop.txt',
+    remotePath: '/Sync/Psync/stop.txt',
+    size: 5,
+    status: 'pending'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async () => ({ folderid: 42 }),
+      uploadFile: async ({ signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const error = new Error('Upload stopped');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      })
+    })
+  });
+
+  const processing = engine.processPending();
+  await waitFor(() => engine.getStatus().activeUploads.length === 1);
+  const stopped = await engine.requestStop();
+  const result = await processing;
+  const files = await store.listFiles();
+
+  assert.equal(stopped.stopping, true);
+  assert.equal(result.stopped, 1);
+  assert.equal(files[0].status, 'pending');
+  assert.equal(files[0].error, 'Stopped');
+  assert.equal(engine.getStatus().activeUploads.length, 0);
+});
+
 test('SyncEngine exposes aggregate upload speed while uploads are active', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));

@@ -232,6 +232,38 @@ test('PCloudClient streams uploadfile multipart with nopartial and mtime', async
   }
 });
 
+test('PCloudClient aborts an active multipart upload', async () => {
+  const server = await withServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      setTimeout(() => {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ result: 0, fileids: [8] }));
+      }, 60);
+    });
+  });
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-upload-abort-'));
+  const filePath = path.join(dir, 'abort.txt');
+  await writeFile(filePath, 'hello');
+
+  try {
+    const controller = new AbortController();
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token' });
+    const upload = client.uploadFile({
+      filePath,
+      filename: 'abort.txt',
+      folderid: 42,
+      signal: controller.signal
+    });
+
+    setTimeout(() => controller.abort(), 10);
+
+    await assert.rejects(upload, /Upload stopped/);
+  } finally {
+    await server.close();
+  }
+});
+
 test('PCloudClient wraps progress, checksum, diff, and server selection APIs', async () => {
   const calls = [];
   const server = await withServer((req, res) => {

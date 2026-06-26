@@ -134,7 +134,7 @@ export class PCloudClient {
     return this.requestJson('diff', params);
   }
 
-  async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, onProgress }) {
+  async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, onProgress, signal }) {
     const fields = {
       access_token: this.accessToken,
       nopartial: '1'
@@ -150,7 +150,7 @@ export class PCloudClient {
     if (progressHash) {
       fields.progresshash = progressHash;
     }
-    return this.multipartUpload('/uploadfile', fields, filePath, filename, onProgress);
+    return this.multipartUpload('/uploadfile', fields, filePath, filename, onProgress, signal);
   }
 
   async requestJson(method, params = {}, options = {}) {
@@ -178,12 +178,16 @@ export class PCloudClient {
     return body;
   }
 
-  async multipartUpload(urlPath, fields, filePath, filename, onProgress = null) {
+  async multipartUpload(urlPath, fields, filePath, filename, onProgress = null, signal = null) {
     this.#requireToken();
-    return retryTransient(() => this.#multipartUploadOnce(urlPath, fields, filePath, filename, onProgress));
+    return retryTransient(() => this.#multipartUploadOnce(urlPath, fields, filePath, filename, onProgress, signal));
   }
 
-  async #multipartUploadOnce(urlPath, fields, filePath, filename, onProgress) {
+  async #multipartUploadOnce(urlPath, fields, filePath, filename, onProgress, signal) {
+    if (signal?.aborted) {
+      throw uploadStoppedError();
+    }
+
     const url = this.urlFor(urlPath);
     const boundary = `pcloud-nas-sync-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const transport = url.protocol === 'http:' ? http : https;
@@ -231,18 +235,24 @@ export class PCloudClient {
 
       let settled = false;
       let stream = null;
+      const abortUpload = () => {
+        fail(uploadStoppedError());
+      };
+      signal?.addEventListener('abort', abortUpload, { once: true });
 
       function settle(action) {
         if (settled) {
           return;
         }
         settled = true;
+        signal?.removeEventListener('abort', abortUpload);
         action();
       }
 
       function fail(error) {
         settle(() => {
           stream?.destroy();
+          request.destroy();
           reject(error);
         });
       }
@@ -356,7 +366,7 @@ async function retryTransient(fn) {
       return await fn();
     } catch (error) {
       lastError = error;
-      if (!isTransientNetworkError(error) || attempt === TRANSIENT_RETRY_DELAYS_MS.length) {
+      if (isAbortError(error) || !isTransientNetworkError(error) || attempt === TRANSIENT_RETRY_DELAYS_MS.length) {
         throw error;
       }
       await delay(TRANSIENT_RETRY_DELAYS_MS[attempt]);
@@ -371,6 +381,17 @@ function isTransientNetworkError(error) {
   return ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNABORTED'].includes(code)
     || message.includes('socket hang up')
     || message.includes('network');
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+}
+
+function uploadStoppedError() {
+  const error = new Error('Upload stopped');
+  error.name = 'AbortError';
+  error.code = 'ABORT_ERR';
+  return error;
 }
 
 function delay(ms) {
