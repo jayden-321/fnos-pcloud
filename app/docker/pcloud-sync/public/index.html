@@ -8,10 +8,6 @@
   </head>
   <body>
     <aside class="sidebar">
-      <div class="window-dots" aria-hidden="true">
-        <span></span><span></span><span></span>
-      </div>
-      <h1>pCloud Sync</h1>
       <nav>
         <button class="nav-item active" data-tab="tasks" type="button">同步任务</button>
         <button class="nav-item" data-tab="logs" type="button">同步日志</button>
@@ -24,7 +20,7 @@
       <header class="workspace-header">
         <div>
           <h2 id="pageTitle">同步任务</h2>
-          <p>pCloud NAS Sync <span id="appVersion"></span></p>
+          <p id="appVersion"></p>
         </div>
         <div class="actions">
           <button id="scanNow" type="button">立即扫描</button>
@@ -93,6 +89,14 @@
 
       <section id="settingsPanel" class="tab-panel" data-panel="settings" hidden>
         <form id="settingsForm" class="settings-grid">
+          <section class="panel task-editor-panel">
+            <div class="panel-title">
+              <h3>任务配置</h3>
+              <button id="addTask" type="button">新增任务</button>
+            </div>
+            <div id="taskEditors" class="task-editors"></div>
+          </section>
+
           <section class="panel">
             <h3>pCloud 授权</h3>
             <label>
@@ -138,20 +142,28 @@
               <label>
                 并发上传数
                 <input name="concurrency" type="number" min="1" max="8">
+                <small class="field-note">pCloud 官方文档未声明推荐并发；建议 1-4，最高 8。</small>
               </label>
+            </div>
+            <div class="two">
+              <label>
+                日志保存天数
+                <input name="logRetentionDays" type="number" min="0" max="3650" step="1">
+                <small class="field-note">0 表示不按时间删除。</small>
+              </label>
+              <label>
+                日志保存条数
+                <input name="logRetentionCount" type="number" min="0" max="10000" step="10">
+                <small class="field-note">0 表示不按条数删除。</small>
+              </label>
+            </div>
+            <div class="row">
+              <button id="clearEvents" type="button">删除日志</button>
             </div>
             <label>
               忽略规则
               <textarea name="ignorePatterns" rows="7"></textarea>
             </label>
-          </section>
-
-          <section class="panel task-editor-panel">
-            <div class="panel-title">
-              <h3>任务配置</h3>
-              <button id="addTask" type="button">新增任务</button>
-            </div>
-            <div id="taskEditors" class="task-editors"></div>
           </section>
 
           <button class="save-settings" type="submit">保存设置</button>

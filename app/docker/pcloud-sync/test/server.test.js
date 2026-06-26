@@ -31,7 +31,7 @@ test('HTTP API returns redacted config and aggregate status', async () => {
 
   assert.equal(configResponse.status, 200);
   assert.equal((await configResponse.json()).pcloud.accessToken, '***');
-  assert.equal(status.version, '0.2.1');
+  assert.equal(status.version, '0.2.2');
   assert.equal(status.stats.failed, 1);
   assert.deepEqual(status.tasks, []);
   assert.deepEqual(status.uploading.map((file) => file.key), ['b.txt']);
@@ -99,6 +99,36 @@ test('HTTP API keeps saved token masks and allows deleting all tasks', async () 
   assert.deepEqual(saved.tasks, []);
   assert.deepEqual(saved.sources, []);
   assert.equal(saved.pcloud.accessToken, 'old-token');
+});
+
+test('HTTP API prunes and clears sync logs', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-events-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  await store.saveConfig({
+    port: 8080,
+    pcloud: { accessToken: 'secret', hostname: 'api.pcloud.com', remoteRoot: '/NAS' },
+    sync: { intervalSeconds: 300, concurrency: 2, logRetentionDays: 0, logRetentionCount: 5, ignorePatterns: [] },
+    tasks: []
+  });
+  for (let index = 0; index < 5; index += 1) {
+    await store.addEvent('upload_succeeded', `docs/${index}.txt`, '');
+  }
+
+  const app = createApp({ store, engine: {} });
+  const saveResponse = await app.fetch(new Request('http://local/api/config', {
+    method: 'POST',
+    body: JSON.stringify({ sync: { logRetentionDays: 0, logRetentionCount: 2 } })
+  }));
+
+  assert.equal(saveResponse.status, 200);
+  assert.equal((await store.listEvents()).length, 2);
+
+  const clearResponse = await app.fetch(new Request('http://local/api/events', { method: 'DELETE' }));
+
+  assert.equal(clearResponse.status, 200);
+  assert.deepEqual(await clearResponse.json(), { deleted: 2 });
+  assert.equal((await store.listEvents()).length, 0);
 });
 
 test('HTTP API lists local folders inside allowed roots only', async () => {

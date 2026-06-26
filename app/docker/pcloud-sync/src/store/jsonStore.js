@@ -142,12 +142,31 @@ export class JsonStore {
       message,
       at: new Date().toISOString()
     });
-    this.state.events = this.state.events.slice(0, EVENT_LIMIT);
+    this.#pruneEventsInMemory();
     await this.#save();
   }
 
   async listEvents(limit = 50) {
     return structuredClone(this.state.events.slice(0, limit));
+  }
+
+  async clearEvents() {
+    const deleted = this.state.events.length;
+    this.state.events = [];
+    if (deleted > 0) {
+      await this.#save();
+    }
+    return deleted;
+  }
+
+  async pruneEvents() {
+    const before = this.state.events.length;
+    this.#pruneEventsInMemory();
+    const deleted = before - this.state.events.length;
+    if (deleted > 0) {
+      await this.#save();
+    }
+    return deleted;
   }
 
   async stats() {
@@ -182,6 +201,24 @@ export class JsonStore {
     await run;
   }
 
+  #pruneEventsInMemory() {
+    const sync = this.state.config?.sync ?? {};
+    const countLimit = clampInteger(sync.logRetentionCount, EVENT_LIMIT, 0, 10000);
+    const dayLimit = clampInteger(sync.logRetentionDays, 30, 0, 3650);
+    let events = this.state.events;
+    if (dayLimit > 0) {
+      const cutoff = Date.now() - dayLimit * 24 * 60 * 60 * 1000;
+      events = events.filter((event) => {
+        const time = new Date(event.at).getTime();
+        return Number.isNaN(time) || time >= cutoff;
+      });
+    }
+    if (countLimit > 0) {
+      events = events.slice(0, countLimit);
+    }
+    this.state.events = events;
+  }
+
   async #writeState() {
     const tmpPath = `${this.statePath}.${++this.saveCounter}.tmp`;
     const body = `${JSON.stringify(this.state, null, 2)}\n`;
@@ -193,4 +230,12 @@ export class JsonStore {
       throw error;
     }
   }
+}
+
+function clampInteger(value, fallback, min, max) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+  return Math.min(Math.max(number, min), max);
 }

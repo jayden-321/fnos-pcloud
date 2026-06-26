@@ -5,9 +5,11 @@ import { readFile } from 'node:fs/promises';
 test('web UI uses neutral pCloud branding', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const oldBrand = '\u98de\u725b\u540c\u6b65';
+  const oldDotsClass = ['window', 'dots'].join('-');
 
   assert.equal(html.includes(oldBrand), false);
-  assert.match(html, /<h1>pCloud Sync<\/h1>/);
+  assert.equal(html.includes(oldDotsClass), false);
+  assert.doesNotMatch(html, /<h1>/);
 });
 
 test('sync task cards are compact summaries without folder emoji or repeated path details', async () => {
@@ -18,4 +20,15 @@ test('sync task cards are compact summaries without folder emoji or repeated pat
 
   assert.doesNotMatch(script, /folder-icon|📁|<dl>|本地路径|pCloud 路径|同步规则|单向上传/);
   assert.doesNotMatch(styles, /\.folder-icon\b|task-card dl/);
+});
+
+test('settings prioritizes task config and exposes log retention controls', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+
+  assert.ok(html.indexOf('任务配置') < html.indexOf('pCloud 授权'));
+  assert.ok(html.indexOf('pCloud 授权') < html.indexOf('同步规则'));
+  assert.match(html, /name="logRetentionDays"/);
+  assert.match(html, /name="logRetentionCount"/);
+  assert.match(html, /id="clearEvents"/);
+  assert.match(html, /pCloud 官方文档未声明推荐并发/);
 });

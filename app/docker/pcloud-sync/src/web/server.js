@@ -58,6 +58,7 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     const body = await request.json();
     const config = normalizeConfig(mergeConfig(previous, body));
     await store.saveConfig(config);
+    await store.pruneEvents();
     return json(redactConfig(config));
   }
 
@@ -135,6 +136,10 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     const queued = await engine.retryFailed();
     const drained = queued > 0 && engine.processPending ? await engine.processPending() : { uploaded: 0, failed: 0 };
     return json({ queued, uploaded: drained.uploaded ?? 0, failed: drained.failed ?? 0 });
+  }
+
+  if (request.method === 'DELETE' && url.pathname === '/api/events') {
+    return json({ deleted: await store.clearEvents() });
   }
 
   if (request.method === 'POST' && url.pathname === '/api/oauth/exchange') {

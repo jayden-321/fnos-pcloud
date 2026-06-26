@@ -8,6 +8,8 @@ test('normalizeConfig supplies safe defaults for first run', () => {
   assert.equal(config.port, 8080);
   assert.equal(config.sync.intervalSeconds, 300);
   assert.equal(config.sync.concurrency, 2);
+  assert.equal(config.sync.logRetentionDays, 30);
+  assert.equal(config.sync.logRetentionCount, 300);
   assert.equal(config.pcloud.hostname, 'api.pcloud.com');
   assert.equal(config.pcloud.remoteRoot, '/NAS-Backup');
   assert.deepEqual(config.tasks, []);
@@ -34,7 +36,7 @@ test('normalizeConfig cleans remote root and source definitions', () => {
       { id: 'photos', path: '/vol1/photos', enabled: true, remoteName: ' Photos ' },
       { path: '   ', enabled: true }
     ],
-    sync: { intervalSeconds: 10, concurrency: 9, ignorePatterns: '  *.tmp\\n.DS_Store\\n' }
+    sync: { intervalSeconds: 10, concurrency: 9, logRetentionDays: -1, logRetentionCount: 20000, ignorePatterns: '  *.tmp\\n.DS_Store\\n' }
   });
 
   assert.equal(config.pcloud.remoteRoot, '/Backups/NAS');
@@ -53,6 +55,8 @@ test('normalizeConfig cleans remote root and source definitions', () => {
   ]);
   assert.equal(config.sync.intervalSeconds, 30);
   assert.equal(config.sync.concurrency, 8);
+  assert.equal(config.sync.logRetentionDays, 0);
+  assert.equal(config.sync.logRetentionCount, 10000);
   assert.deepEqual(config.sync.ignorePatterns, ['*.tmp', '.DS_Store']);
 });
 

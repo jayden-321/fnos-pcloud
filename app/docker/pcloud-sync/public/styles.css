@@ -64,31 +64,9 @@ button:hover {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  padding: 24px 12px 18px;
+  padding: 18px 12px;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
-}
-
-.window-dots {
-  display: flex;
-  gap: 12px;
-  margin: 6px 0 36px 12px;
-}
-
-.window-dots span {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-}
-
-.window-dots span:nth-child(1) { background: #ff5e57; }
-.window-dots span:nth-child(2) { background: #febc2e; }
-.window-dots span:nth-child(3) { background: #28c840; }
-
-.sidebar h1 {
-  margin: 0 12px 18px;
-  color: #435166;
-  font-size: 20px;
 }
 
 .sidebar nav {
@@ -256,6 +234,12 @@ label {
   margin: 0 0 13px;
   color: #2f3d4c;
   font-weight: 650;
+}
+
+.field-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 input,
@@ -529,10 +513,6 @@ dialog::backdrop {
     position: static;
     min-height: auto;
     padding: 12px;
-  }
-
-  .window-dots {
-    display: none;
   }
 
   .sidebar nav {

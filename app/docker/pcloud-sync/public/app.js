@@ -20,6 +20,8 @@ const fields = {
   remoteRoot: form.elements.remoteRoot,
   intervalSeconds: form.elements.intervalSeconds,
   concurrency: form.elements.concurrency,
+  logRetentionDays: form.elements.logRetentionDays,
+  logRetentionCount: form.elements.logRetentionCount,
   ignorePatterns: form.elements.ignorePatterns
 };
 
@@ -62,6 +64,14 @@ document.querySelector('#retryFailed').addEventListener('click', async () => {
   const result = await post('/api/retry-failed', {});
   await refreshStatus();
   show(`${result.queued} 个已入队，${result.uploaded || 0} 个已上传，${result.failed || 0} 个失败`);
+});
+
+document.querySelector('#clearEvents').addEventListener('click', async () => {
+  const result = await del('/api/events');
+  currentEvents = [];
+  updateTaskOptions([]);
+  renderEvents();
+  show(`已删除 ${result.deleted} 条日志`);
 });
 
 document.querySelector('#exchangeCode').addEventListener('click', async () => {
@@ -151,6 +161,8 @@ async function loadConfig() {
   fields.remoteRoot.value = currentConfig.pcloud.remoteRoot;
   fields.intervalSeconds.value = currentConfig.sync.intervalSeconds;
   fields.concurrency.value = currentConfig.sync.concurrency;
+  fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
+  fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
   fields.ignorePatterns.value = currentConfig.sync.ignorePatterns.join('\n');
   renderTaskEditors(currentConfig.tasks || []);
 }
@@ -176,6 +188,8 @@ async function saveConfig() {
     sync: {
       intervalSeconds: Number(fields.intervalSeconds.value),
       concurrency: Number(fields.concurrency.value),
+      logRetentionDays: Number(fields.logRetentionDays.value),
+      logRetentionCount: Number(fields.logRetentionCount.value),
       ignorePatterns: fields.ignorePatterns.value
     }
   });
@@ -401,6 +415,11 @@ async function post(url, body) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body)
   });
+  return parseResponse(response);
+}
+
+async function del(url) {
+  const response = await fetch(url, { method: 'DELETE' });
   return parseResponse(response);
 }
 

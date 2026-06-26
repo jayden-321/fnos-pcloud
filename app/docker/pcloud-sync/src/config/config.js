@@ -10,7 +10,9 @@ const DEFAULT_CONFIG = {
   sync: {
     intervalSeconds: 300,
     concurrency: 2,
-    ignorePatterns: ['.DS_Store', 'Thumbs.db', '*.tmp', '*.part', '~$*']
+    ignorePatterns: ['.DS_Store', 'Thumbs.db', '*.tmp', '*.part', '~$*'],
+    logRetentionDays: 30,
+    logRetentionCount: 300
   },
   tasks: [],
   sources: []
@@ -73,6 +75,8 @@ function normalizeSync(input) {
   return {
     intervalSeconds: clampInteger(input.intervalSeconds, DEFAULT_CONFIG.sync.intervalSeconds, 30, 86400),
     concurrency: clampInteger(input.concurrency, DEFAULT_CONFIG.sync.concurrency, 1, 8),
+    logRetentionDays: clampInteger(input.logRetentionDays, DEFAULT_CONFIG.sync.logRetentionDays, 0, 3650),
+    logRetentionCount: clampInteger(input.logRetentionCount, DEFAULT_CONFIG.sync.logRetentionCount, 0, 10000),
     ignorePatterns: normalizeIgnorePatterns(input.ignorePatterns ?? DEFAULT_CONFIG.sync.ignorePatterns)
   };
 }

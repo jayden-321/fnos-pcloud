@@ -11,6 +11,7 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, synced files, failed files, pending files, active uploads, and aggregate upload speed.
 - Filterable file-level sync logs.
+- Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
 
 ## pCloud Authorization
@@ -96,13 +97,14 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.2.1 is one-way upload only, not two-way sync.
-- v0.2.1 does not propagate local deletions to pCloud.
+- v0.2.2 is one-way upload only, not two-way sync.
+- v0.2.2 does not propagate local deletions to pCloud.
 - File changes are discovered by periodic scans. The default interval is 300 seconds, and users can trigger a manual scan in the UI.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.2.2: Adds configurable sync log retention by age and count, plus a one-click log delete action. Settings now shows task configuration first, documents that pCloud official upload docs do not publish a recommended concurrency number, and removes decorative sidebar branding.
 - v0.2.1: Bumps the package version for fnOS installation and upgrade detection. Sync logs now show file-level upload rows, task cards are compact, saved access tokens display a masked value, and deleting all tasks also clears migrated legacy `sources`.
 - v0.2.0: Adds a multi-task model, left navigation, local folder picker, pCloud remote folder picker, remote folder creation, and aggregate upload speed. Adds pCloud API integration for `getapiserver`, `currentserver`, `uploadprogress`, `checksumfile`, and `diff`.
 - v0.1.9: Converts sync logs into a table view with task, status, and filename filters. Successful uploads now create per-file log entries. Retrying failed or stale files immediately drains the pending queue.

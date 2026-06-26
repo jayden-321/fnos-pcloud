@@ -49,3 +49,36 @@ test('JsonStore serializes concurrent saves without tmp-file races', async () =>
   await reloaded.init();
   assert.equal((await reloaded.listFiles()).length, 50);
 });
+
+test('JsonStore prunes and clears events using log retention config', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-events-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  await store.saveConfig({
+    sync: { logRetentionDays: 0, logRetentionCount: 2 }
+  });
+
+  await store.addEvent('upload_succeeded', 'docs/a.txt', '');
+  await store.addEvent('upload_succeeded', 'docs/b.txt', '');
+  await store.addEvent('upload_succeeded', 'docs/c.txt', '');
+
+  assert.deepEqual((await store.listEvents()).map((event) => event.subject), ['docs/c.txt', 'docs/b.txt']);
+  assert.equal(await store.clearEvents(), 2);
+  assert.deepEqual(await store.listEvents(), []);
+});
+
+test('JsonStore prunes events older than the configured retention days', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-store-event-age-'));
+  const store = new JsonStore(dir);
+  await store.init();
+  await store.saveConfig({
+    sync: { logRetentionDays: 1, logRetentionCount: 0 }
+  });
+  store.state.events = [
+    { type: 'upload_succeeded', subject: 'docs/new.txt', message: '', at: new Date().toISOString() },
+    { type: 'upload_succeeded', subject: 'docs/old.txt', message: '', at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }
+  ];
+
+  assert.equal(await store.pruneEvents(), 1);
+  assert.deepEqual((await store.listEvents()).map((event) => event.subject), ['docs/new.txt']);
+});
