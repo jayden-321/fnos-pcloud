@@ -10,8 +10,16 @@ services:
       DATA_DIR: /data
       PORT: 8080
       NODE_ENV: production
+    # The app API has no authentication of its own; it relies on the fnOS
+    # desktop reverse proxy (manifest disable_authorization_path=false) for
+    # access control. The published port is therefore bound to the host
+    # loopback by default so only that host-local proxy can reach it, instead
+    # of exposing the unauthenticated API on every LAN interface.
+    # Override TRIM_SERVICE_BIND=0.0.0.0 only if you intentionally want direct
+    # LAN access and understand that anyone reaching the port can reconfigure
+    # the pCloud sync target and trigger uploads.
     ports:
-      - "${TRIM_SERVICE_PORT:-17880}:8080"
+      - "${TRIM_SERVICE_BIND:-127.0.0.1}:${TRIM_SERVICE_PORT:-17880}:8080"
     volumes:
       - "${TRIM_PKGVAR:-./data}:/data"
       - "/vol1:/vol1:ro"
