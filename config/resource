@@ -1,0 +1,11 @@
+{
+  "docker-project": {
+    "projects": [
+      {
+        "name": "pcloud-nas-sync",
+        "path": "docker"
+      }
+    ]
+  }
+}
+

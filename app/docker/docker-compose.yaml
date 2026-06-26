@@ -1,0 +1,17 @@
+services:
+  pcloud-nas-sync:
+    container_name: pcloud-nas-sync
+    build:
+      context: ./pcloud-sync
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:22-alpine}
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      PORT: 8080
+      NODE_ENV: production
+    ports:
+      - "${TRIM_SERVICE_PORT:-17880}:8080"
+    volumes:
+      - "${TRIM_PKGVAR:-./data}:/data"
+      - "/vol1:/vol1:ro"

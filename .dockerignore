@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.DS_Store
+test
+work
+.data
+data
+state.json
+.env
+*.fpk
+*.zip

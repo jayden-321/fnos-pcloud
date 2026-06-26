@@ -1,0 +1,13 @@
+{
+  "name": "pcloud-nas-sync",
+  "version": "0.2.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

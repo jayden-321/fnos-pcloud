@@ -1,0 +1,22 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+npm-debug.log*
+
+# Runtime state and local preview data
+.data/
+data/
+state.json
+*.tmp
+work/
+docs/superpowers/
+
+# Build artifacts
+*.fpk
+*.zip
+*.tar
+*.tgz
+dist/
+outputs/

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>pCloud NAS Sync</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="window-dots" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <h1>飞牛同步</h1>
+      <nav>
+        <button class="nav-item active" data-tab="tasks" type="button">同步任务</button>
+        <button class="nav-item" data-tab="logs" type="button">同步日志</button>
+        <button class="nav-item" data-tab="settings" type="button">设置</button>
+      </nav>
+      <button id="createTask" class="create-task" type="button">＋ 创建新任务</button>
+    </aside>
+
+    <main class="workspace">
+      <header class="workspace-header">
+        <div>
+          <h2 id="pageTitle">同步任务</h2>
+          <p>pCloud NAS Sync <span id="appVersion"></span></p>
+        </div>
+        <div class="actions">
+          <button id="scanNow" type="button">立即扫描</button>
+          <button id="retryFailed" type="button">重试失败</button>
+        </div>
+      </header>
+
+      <section id="tasksPanel" class="tab-panel" data-panel="tasks">
+        <section class="metrics" aria-label="同步统计">
+          <div><span id="statTotal">0</span><small>总文件</small></div>
+          <div><span id="statSynced">0</span><small>已成功</small></div>
+          <div><span id="statFailed">0</span><small>失败</small></div>
+          <div><span id="statPending">0</span><small>待上传</small></div>
+          <div><span id="statUploading">0</span><small>上传中</small></div>
+          <div><span id="statSpeed">0 B/s</span><small>上传速度</small></div>
+        </section>
+
+        <section id="taskCards" class="task-list" aria-label="同步任务"></section>
+
+        <section class="panel">
+          <h3>队列状态</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>状态</th>
+                  <th>文件</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody id="fileRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="logsPanel" class="tab-panel" data-panel="logs" hidden>
+        <section class="panel log-panel">
+          <div class="log-toolbar">
+            <select id="eventTaskFilter" aria-label="任务筛选">
+              <option value="">全部任务</option>
+            </select>
+            <select id="eventStatusFilter" aria-label="状态筛选">
+              <option value="">全部状态</option>
+              <option value="success">成功</option>
+              <option value="queued">待处理</option>
+              <option value="failed">失败</option>
+            </select>
+            <input id="eventSearch" autocomplete="off" placeholder="搜索文件名称">
+          </div>
+          <div class="table-wrap log-table-wrap">
+            <table class="log-table">
+              <thead>
+                <tr>
+                  <th>文件名称</th>
+                  <th>任务</th>
+                  <th>时间</th>
+                  <th>状态</th>
+                  <th>事件</th>
+                </tr>
+              </thead>
+              <tbody id="events"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="settingsPanel" class="tab-panel" data-panel="settings" hidden>
+        <form id="settingsForm" class="settings-grid">
+          <section class="panel">
+            <h3>pCloud 授权</h3>
+            <label>
+              pCloud 区域
+              <select name="hostname">
+                <option value="api.pcloud.com">US api.pcloud.com</option>
+                <option value="eapi.pcloud.com">EU eapi.pcloud.com</option>
+              </select>
+            </label>
+            <label>
+              pCloud Client ID
+              <input name="clientId" autocomplete="off">
+            </label>
+            <label>
+              pCloud Client Secret
+              <input name="clientSecret" type="password" autocomplete="off">
+            </label>
+            <label>
+              授权 Code
+              <input name="oauthCode" autocomplete="off">
+            </label>
+            <div class="row">
+              <button id="exchangeCode" type="button">换取 Token</button>
+              <button id="testPcloud" type="button">测试连接</button>
+            </div>
+            <label>
+              Access Token
+              <input name="accessToken" type="password" autocomplete="off" placeholder="已保存时可留空">
+            </label>
+            <label>
+              默认 pCloud 根目录
+              <input name="remoteRoot" placeholder="/NAS-Backup">
+            </label>
+          </section>
+
+          <section class="panel">
+            <h3>同步规则</h3>
+            <div class="two">
+              <label>
+                扫描间隔秒
+                <input name="intervalSeconds" type="number" min="30" step="30">
+              </label>
+              <label>
+                并发上传数
+                <input name="concurrency" type="number" min="1" max="8">
+              </label>
+            </div>
+            <label>
+              忽略规则
+              <textarea name="ignorePatterns" rows="7"></textarea>
+            </label>
+          </section>
+
+          <section class="panel task-editor-panel">
+            <div class="panel-title">
+              <h3>同步任务</h3>
+              <button id="addTask" type="button">新增任务</button>
+            </div>
+            <div id="taskEditors" class="task-editors"></div>
+          </section>
+
+          <button class="save-settings" type="submit">保存设置</button>
+        </form>
+      </section>
+    </main>
+
+    <dialog id="folderDialog">
+      <form method="dialog" class="folder-dialog">
+        <header>
+          <h3 id="folderDialogTitle">选择文件夹</h3>
+          <button value="cancel" type="submit">关闭</button>
+        </header>
+        <div class="folder-path" id="folderPath">/</div>
+        <div class="folder-actions">
+          <button id="folderUp" type="button">上一级</button>
+          <button id="folderSelect" type="button">选择当前文件夹</button>
+        </div>
+        <div id="remoteCreateRow" class="remote-create" hidden>
+          <input id="remoteFolderName" autocomplete="off" placeholder="新文件夹名称">
+          <button id="remoteCreate" type="button">新建</button>
+        </div>
+        <ul id="folderEntries" class="folder-entries"></ul>
+      </form>
+    </dialog>
+
+    <div id="toast" role="status"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

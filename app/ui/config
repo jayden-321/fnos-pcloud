@@ -1,0 +1,16 @@
+{
+  ".url": {
+    "pcloud-nas-sync.APPLICATION": {
+      "title": "pCloud NAS Sync",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "http",
+      "port": "17880",
+      "url": "/",
+      "allUsers": false,
+      "control": {
+        "accessPerm": "readonly"
+      }
+    }
+  }
+}
