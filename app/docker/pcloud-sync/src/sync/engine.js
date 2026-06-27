@@ -984,6 +984,9 @@ export class SyncEngine {
 
     const job = {
       running: true,
+      paused: false,
+      stopRequested: false,
+      phase: 'verifying',
       taskId: normalizedTaskId,
       totalCandidates: 0,
       checked: 0,
@@ -998,15 +1001,19 @@ export class SyncEngine {
 
     this.verifyMtimeMismatches({
       taskId: normalizedTaskId,
+      stopSignal: job,
       onProgress: (progress) => {
         Object.assign(job, progress, {
           running: true,
+          phase: job.stopRequested ? 'pausing' : progress.phase || 'verifying',
           updatedAt: new Date().toISOString()
         });
       }
     }).then((summary) => {
       Object.assign(job, summary, {
         running: false,
+        paused: summary.paused === true,
+        phase: summary.paused === true ? 'paused' : 'completed',
         finishedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         error: ''
@@ -1024,7 +1031,23 @@ export class SyncEngine {
     return structuredClone(job);
   }
 
-  async verifyMtimeMismatches({ taskId = '', limit = 0, concurrency = 0, onProgress = null } = {}) {
+  async stopMtimeMismatchVerification({ taskId = '' } = {}) {
+    const normalizedTaskId = String(taskId || '').trim();
+    const jobKey = normalizedTaskId || 'all';
+    const job = this.mtimeVerificationJobs.get(jobKey);
+    if (!job) {
+      return { running: false, paused: false, taskId: normalizedTaskId };
+    }
+    job.stopRequested = true;
+    job.phase = job.running ? 'pausing' : 'paused';
+    job.updatedAt = new Date().toISOString();
+    return structuredClone({
+      ...job,
+      paused: true
+    });
+  }
+
+  async verifyMtimeMismatches({ taskId = '', limit = 0, concurrency = 0, onProgress = null, stopSignal = null } = {}) {
     const config = normalizeConfig(await this.store.loadConfig() ?? {});
     const normalizedTaskId = String(taskId || '').trim();
     const maxItems = Math.max(0, Number(limit || 0));
@@ -1054,11 +1077,13 @@ export class SyncEngine {
       matched: 0,
       mismatched: 0,
       failed: 0,
+      paused: false,
+      phase: 'verifying',
       results: []
     };
     onProgress?.(summary);
 
-    await runLimited(selected, workerCount, async (file) => {
+    await runLimitedWhile(selected, workerCount, () => stopSignal?.stopRequested === true, async (file) => {
       const target = {
         fileid: file.pcloudFileId,
         path: file.pcloudFileId ? '' : file.pcloudPath || file.remotePath
@@ -1111,6 +1136,10 @@ export class SyncEngine {
       }
       onProgress?.(summary);
     });
+    if (stopSignal?.stopRequested === true) {
+      summary.paused = true;
+      summary.phase = 'paused';
+    }
 
     await this.store.addEvent('mtime_mismatch_verified', normalizedTaskId || 'all', `${summary.checked}/${summary.totalCandidates} checked, ${summary.matched} matched, ${summary.mismatched} mismatched, ${summary.failed} failed`);
     return summary;
@@ -1467,6 +1496,20 @@ async function runLimited(items, limit, worker) {
   const workers = Array.from({ length: Math.max(1, Math.min(limit, queue.length || 1)) }, async () => {
     while (queue.length > 0) {
       const item = queue.shift();
+      await worker(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
+async function runLimitedWhile(items, limit, shouldStop, worker) {
+  const queue = [...items];
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, queue.length || 1)) }, async () => {
+    while (queue.length > 0 && !shouldStop()) {
+      const item = queue.shift();
+      if (!item) {
+        return;
+      }
       await worker(item);
     }
   });

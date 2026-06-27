@@ -349,9 +349,17 @@ async function handleMtimeMenu(menu) {
   }
   if (action === 'verify') {
     await verifyMtimeMismatches(taskId);
+  } else if (action === 'stop') {
+    await stopMtimeMismatchVerification(taskId);
   } else if (action === 'mismatched' || action === 'failed') {
     await loadMtimeMismatchDetails(taskId, action);
   }
+}
+
+async function stopMtimeMismatchVerification(taskId) {
+  const result = await post('/api/verify-mtime-mismatches/stop', { taskId });
+  await refreshStatus();
+  show(result.running ? '正在暂停校验' : '校验已暂停');
 }
 
 function mtimeActionMenu(task, label, running, stats) {
@@ -360,7 +368,7 @@ function mtimeActionMenu(task, label, running, stats) {
   return `
     <select class="task-action-select" data-action="mtime-menu" data-task-id="${escapeHtml(task.id)}" aria-label="时间校验">
       <option value="">${escapeHtml(label)}</option>
-      <option value="verify" ${running ? 'disabled' : ''}>${running ? '正在校验' : '全部校验时间不同'}</option>
+      ${running ? '<option value="stop">暂停校验</option>' : '<option value="verify">全部校验时间不同</option>'}
       <option value="mismatched" ${mismatched > 0 ? '' : 'disabled'}>查看内容不一致${mismatched > 0 ? ` (${formatNumber(mismatched)})` : ''}</option>
       <option value="failed" ${failed > 0 ? '' : 'disabled'}>查看校验失败${failed > 0 ? ` (${formatNumber(failed)})` : ''}</option>
     </select>

@@ -158,6 +158,31 @@ test('HTTP API starts full mtime-mismatch verification', async () => {
   assert.equal((await response.json()).running, true);
 });
 
+test('HTTP API pauses mtime-mismatch verification', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-mtime-stop-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  let stopOptions = null;
+
+  const app = createApp({
+    store,
+    engine: {
+      stopMtimeMismatchVerification: async (options) => {
+        stopOptions = options;
+        return { running: false, paused: true, taskId: 'docs' };
+      }
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/verify-mtime-mismatches/stop', {
+    method: 'POST',
+    body: JSON.stringify({ taskId: 'docs' })
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(stopOptions, { taskId: 'docs' });
+  assert.equal((await response.json()).paused, true);
+});
+
 test('HTTP API starts a pCloud speed test', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-speed-test-'));
   const store = new SqliteStore(dir);

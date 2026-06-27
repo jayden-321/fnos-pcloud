@@ -153,9 +153,12 @@ test('task cards expose a compact mtime verification menu and details dialog', a
   assert.match(html, /id="mtimeDetailsRows"/);
   assert.match(script, /data-action="mtime-menu"/);
   assert.match(script, /全部校验时间不同/);
+  assert.match(script, /暂停校验/);
   assert.match(script, /查看内容不一致/);
   assert.match(script, /查看校验失败/);
   assert.match(script, /loadMtimeMismatchDetails/);
+  assert.match(script, /stopMtimeMismatchVerification/);
+  assert.match(script, /\/api\/verify-mtime-mismatches\/stop/);
   assert.match(script, /\/api\/mtime-mismatches/);
   assert.match(styles, /task-action-select/);
   assert.match(styles, /mtime-details-table/);

@@ -192,6 +192,16 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     }));
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/verify-mtime-mismatches/stop') {
+    const body = await readJsonBody(request);
+    if (!engine.stopMtimeMismatchVerification) {
+      return json({ error: 'Mtime mismatch verification pause is unavailable' }, 501);
+    }
+    return json(await engine.stopMtimeMismatchVerification({
+      taskId: String(body.taskId || '').trim()
+    }));
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/speed-test') {
     const body = await readJsonBody(request);
     if (!engine.startSpeedTest) {

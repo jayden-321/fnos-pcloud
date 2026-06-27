@@ -1676,6 +1676,58 @@ test('SyncEngine verifies all mtime-mismatched files with bounded concurrency', 
   assert.equal(files.every((file) => file.mtimeMismatchStatus === 'matched'), true);
 });
 
+test('SyncEngine can pause a running mtime-mismatch verification job', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    sync: { mtimeVerifyConcurrency: 1 },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+
+  for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+    const filePath = path.join(sourceDir, name);
+    await writeFile(filePath, 'hello');
+    const info = await stat(filePath);
+    await store.upsertFile({
+      key: `docs/${name}`,
+      sourceId: 'docs',
+      absolutePath: filePath,
+      relativePath: name,
+      remotePath: `/Sync/docs/${name}`,
+      pcloudFileId: name.charCodeAt(0),
+      size: 5,
+      mtimeMs: Math.trunc(info.mtimeMs),
+      status: 'existing',
+      mtimeMismatch: true
+    });
+  }
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      checksumFile: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { sha1: 'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d' };
+      }
+    })
+  });
+
+  const started = await engine.startMtimeMismatchVerification({ taskId: 'docs' });
+  assert.equal(started.running, true);
+  await waitFor(() => engine.getStatus().mtimeVerifications[0]?.checked >= 1);
+  const stopped = await engine.stopMtimeMismatchVerification({ taskId: 'docs' });
+  await waitFor(() => engine.getStatus().mtimeVerifications[0]?.running === false);
+  const job = engine.getStatus().mtimeVerifications[0];
+
+  assert.equal(stopped.paused, true);
+  assert.equal(job.paused, true);
+  assert.equal(job.phase, 'paused');
+  assert.equal(job.checked < 3, true);
+});
+
 test('SyncEngine clears stale file state before rebuilding a scan from current tasks', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
