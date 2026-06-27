@@ -258,6 +258,31 @@ test('HTTP API lists mtime-mismatch verification details by task and status', as
   ]);
 });
 
+test('HTTP API resolves a selected mtime content mismatch', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-mtime-resolve-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  let options = null;
+
+  const app = createApp({
+    store,
+    engine: {
+      resolveMtimeMismatch: async (input) => {
+        options = input;
+        return { resolved: true, action: input.action };
+      }
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/mtime-mismatches/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ key: 'docs/a.txt', action: 'download_remote' })
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(options, { key: 'docs/a.txt', action: 'download_remote' });
+  assert.deepEqual(await response.json(), { resolved: true, action: 'download_remote' });
+});
+
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
   const store = new SqliteStore(dir);

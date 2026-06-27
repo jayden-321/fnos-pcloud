@@ -99,6 +99,17 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     }));
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/mtime-mismatches/resolve') {
+    const body = await readJsonBody(request);
+    if (!engine.resolveMtimeMismatch) {
+      return json({ error: 'Mtime mismatch resolution is unavailable' }, 501);
+    }
+    return json(await engine.resolveMtimeMismatch({
+      key: String(body.key || '').trim(),
+      action: String(body.action || '').trim()
+    }));
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/pcloud/folders') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);

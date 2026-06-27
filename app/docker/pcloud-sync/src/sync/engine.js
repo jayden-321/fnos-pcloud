@@ -1,6 +1,6 @@
 import { createReadStream, createWriteStream, watch } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeConfig } from '../config/config.js';
@@ -921,17 +921,38 @@ export class SyncEngine {
       onProgress?.({ phase: 'uploading', sizeMb: size, sizeBytes });
       const folder = await client.ensureFolder(SPEED_TEST_REMOTE_PATH);
       const uploadStartedAt = Date.now();
+      let uploadedBytes = 0;
       const uploadResponse = await client.uploadFile({
         filePath: uploadPath,
         filename,
-        folderid: folder.folderid
+        folderid: folder.folderid,
+        onProgress: (bytes) => {
+          uploadedBytes += Number(bytes || 0);
+          onProgress?.({
+            phase: 'uploading',
+            sizeMb: size,
+            sizeBytes,
+            uploadProgress: progressMetric(uploadedBytes, sizeBytes, uploadStartedAt)
+          });
+        }
       });
       const uploadMs = Math.max(1, Date.now() - uploadStartedAt);
       fileid = uploadMetadata(uploadResponse)?.fileid ?? uploadResponse?.fileids?.[0] ?? null;
 
       onProgress?.({ phase: 'downloading', sizeMb: size, sizeBytes });
       const downloadStartedAt = Date.now();
-      const download = await client.downloadFile({ fileid, filePath: downloadPath });
+      const download = await client.downloadFile({
+        fileid,
+        filePath: downloadPath,
+        onProgress: (bytes, total) => {
+          onProgress?.({
+            phase: 'downloading',
+            sizeMb: size,
+            sizeBytes,
+            downloadProgress: progressMetric(bytes, total || sizeBytes, downloadStartedAt)
+          });
+        }
+      });
       const downloadMs = Math.max(1, Date.now() - downloadStartedAt);
       const downloadSha1 = await sha1File(downloadPath);
 
@@ -1143,6 +1164,126 @@ export class SyncEngine {
 
     await this.store.addEvent('mtime_mismatch_verified', normalizedTaskId || 'all', `${summary.checked}/${summary.totalCandidates} checked, ${summary.matched} matched, ${summary.mismatched} mismatched, ${summary.failed} failed`);
     return summary;
+  }
+
+  async resolveMtimeMismatch({ key = '', action = '' } = {}) {
+    const normalizedKey = String(key || '').trim();
+    const normalizedAction = String(action || '').trim();
+    if (!normalizedKey) {
+      throw new Error('File key is required');
+    }
+    if (!['upload_local', 'download_remote'].includes(normalizedAction)) {
+      throw new Error('Unsupported mismatch resolution action');
+    }
+
+    const config = normalizeConfig(await this.store.loadConfig() ?? {});
+    if (!config.pcloud.accessToken) {
+      throw new Error('pCloud access token is not configured');
+    }
+    const file = await this.store.getFile(normalizedKey);
+    if (!file || file.mtimeMismatch !== true || file.mtimeMismatchStatus !== 'mismatched') {
+      throw new Error('Only verified content-mismatched files can be resolved');
+    }
+    if (!file.absolutePath) {
+      throw new Error('Local file path is missing');
+    }
+
+    const client = this.pcloudFactory(config);
+    if (normalizedAction === 'upload_local') {
+      return this.replaceRemoteWithLocal({ config, client, file });
+    }
+    return this.replaceLocalWithRemote({ client, file });
+  }
+
+  async replaceRemoteWithLocal({ config, client, file }) {
+    const info = await stat(file.absolutePath);
+    const mtimeMs = Math.trunc(info.mtimeMs);
+    const remoteFolder = remoteFolderForFile(config, file);
+    const folder = await client.ensureFolder(remoteFolder);
+    const uploadResponse = await client.uploadFile({
+      filePath: file.absolutePath,
+      filename: path.posix.basename(file.relativePath),
+      folderid: folder.folderid,
+      mtime: Math.trunc(mtimeMs / 1000),
+      renameIfExists: false
+    });
+    const metadata = uploadMetadata(uploadResponse);
+    const pcloudFileId = uploadResponse.fileids?.[0] ?? metadata?.fileid ?? file.pcloudFileId ?? null;
+    const pcloudPath = metadata?.path || file.pcloudPath || file.remotePath;
+    const sha1 = await sha1File(file.absolutePath);
+    const updated = await this.store.setStatus(file.key, file.status, {
+      size: Number(info.size || 0),
+      mtimeMs,
+      mtime: Math.trunc(mtimeMs / 1000),
+      pcloudFileId,
+      pcloudFolderId: metadata?.parentfolderid ?? folder.folderid ?? file.pcloudFolderId ?? null,
+      pcloudPath,
+      remotePath: pcloudPath || file.remotePath,
+      pcloudMtimeMs: metadata?.mtime ? Number(metadata.mtime) * 1000 : mtimeMs,
+      checksumSha1: sha1,
+      checksumVerifiedAt: new Date().toISOString(),
+      checksumSampleStatus: 'matched',
+      checksumSampleError: '',
+      mtimeMismatch: false,
+      mtimeMismatchVerified: true,
+      mtimeMismatchVerifiedAt: new Date().toISOString(),
+      mtimeMismatchStatus: 'matched',
+      mtimeMismatchError: '',
+      resolvedAt: new Date().toISOString(),
+      resolvedAction: 'upload_local'
+    });
+    await this.store.addEvent('mtime_mismatch_resolved', file.sourceId || file.key, file.relativePath || file.key, {
+      key: file.key,
+      action: 'upload_local'
+    });
+    return { resolved: true, action: 'upload_local', file: updated };
+  }
+
+  async replaceLocalWithRemote({ client, file }) {
+    if (!client?.downloadFile) {
+      throw new Error('pCloud download is unavailable');
+    }
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'pcloud-resolve-'));
+    const tempPath = path.join(tempDir, path.basename(file.absolutePath));
+    try {
+      await client.downloadFile({
+        fileid: file.pcloudFileId,
+        path: file.pcloudFileId ? '' : file.pcloudPath || file.remotePath,
+        filePath: tempPath
+      });
+      await mkdir(path.dirname(file.absolutePath), { recursive: true });
+      await rename(tempPath, file.absolutePath);
+      if (Number(file.pcloudMtimeMs || 0) > 0) {
+        const remoteDate = new Date(Number(file.pcloudMtimeMs));
+        await utimes(file.absolutePath, remoteDate, remoteDate).catch(() => {});
+      }
+      const info = await stat(file.absolutePath);
+      const mtimeMs = Math.trunc(info.mtimeMs);
+      const sha1 = await sha1File(file.absolutePath);
+      const updated = await this.store.setStatus(file.key, file.status, {
+        size: Number(info.size || 0),
+        mtimeMs,
+        mtime: Math.trunc(mtimeMs / 1000),
+        checksumSha1: sha1,
+        checksumVerifiedAt: new Date().toISOString(),
+        checksumSampleStatus: 'matched',
+        checksumSampleError: '',
+        mtimeMismatch: false,
+        mtimeMismatchVerified: true,
+        mtimeMismatchVerifiedAt: new Date().toISOString(),
+        mtimeMismatchStatus: 'matched',
+        mtimeMismatchError: '',
+        resolvedAt: new Date().toISOString(),
+        resolvedAction: 'download_remote'
+      });
+      await this.store.addEvent('mtime_mismatch_resolved', file.sourceId || file.key, file.relativePath || file.key, {
+        key: file.key,
+        action: 'download_remote'
+      });
+      return { resolved: true, action: 'download_remote', file: updated };
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   recordUploadProgress(key, chunkBytes, totalBytes = 0) {
@@ -1602,6 +1743,17 @@ function speedMetric(bytes, durationMs) {
     bytes: byteCount,
     durationMs: elapsedMs,
     bytesPerSecond: Math.round(byteCount / (elapsedMs / 1000))
+  };
+}
+
+function progressMetric(doneBytes, totalBytes, startedAt) {
+  const bytes = Math.max(0, Number(doneBytes || 0));
+  const total = Math.max(bytes, Number(totalBytes || 0));
+  return {
+    bytes,
+    totalBytes: total,
+    percent: total > 0 ? Math.min(100, Math.round((bytes / total) * 100)) : 0,
+    bytesPerSecond: Math.round(bytes / (Math.max(1, Date.now() - startedAt) / 1000))
   };
 }
 

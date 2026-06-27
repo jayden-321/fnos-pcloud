@@ -393,6 +393,37 @@ test('PCloudClient downloads files through getfilelink and deletes remote files'
   }
 });
 
+test('PCloudClient times out stalled pCloud downloads', async () => {
+  let downloadHost = '';
+  const server = await withServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    res.setHeader('content-type', 'application/json');
+    if (url.pathname === '/getfilelink') {
+      res.end(JSON.stringify({ result: 0, hosts: [downloadHost], path: '/download/stalled.bin' }));
+      return;
+    }
+    res.end(JSON.stringify({ result: 0 }));
+  });
+  const downloadServer = await withServer((req, res) => {
+    assert.equal(req.url, '/download/stalled.bin');
+    res.writeHead(200, { 'content-type': 'application/octet-stream' });
+    res.write('partial');
+  });
+  downloadHost = downloadServer.baseUrl;
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-download-timeout-'));
+
+  try {
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token', downloadTimeoutMs: 20 });
+    await assert.rejects(
+      () => client.downloadFile({ fileid: 77, filePath: path.join(dir, 'stalled.bin') }),
+      /pCloud download timed out/
+    );
+  } finally {
+    await server.close();
+    await downloadServer.close();
+  }
+});
+
 test('PCloudClient sends multipart uploads with a fixed content length', async () => {
   let headers = {};
   const server = await withServer((req, res) => {

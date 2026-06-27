@@ -560,6 +560,18 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 
+.resolution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.resolution-actions button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .folder-path {
   padding: 10px;
   border: 1px solid var(--line);

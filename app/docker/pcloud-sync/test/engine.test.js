@@ -165,6 +165,111 @@ test('SyncEngine runs a pCloud upload and download speed test without syncing fi
   assert.deepEqual(calls.map((call) => call[0]), ['ensureFolder', 'uploadFile', 'downloadFile', 'deleteFile']);
 });
 
+test('SyncEngine resolves a content mismatch by uploading the local file over pCloud', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'a.txt');
+  await writeFile(filePath, 'local');
+  const info = await stat(filePath);
+  const calls = [];
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/a.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'a.txt',
+    remotePath: '/Sync/docs/a.txt',
+    pcloudPath: '/Sync/docs/a.txt',
+    pcloudFileId: 11,
+    status: 'existing',
+    size: Number(info.size),
+    mtimeMs: Math.trunc(info.mtimeMs),
+    mtimeMismatch: true,
+    mtimeMismatchStatus: 'mismatched'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async (remotePath) => {
+        calls.push(['ensureFolder', remotePath]);
+        return { folderid: 44 };
+      },
+      uploadFile: async (payload) => {
+        calls.push(['uploadFile', payload.filename, payload.folderid, payload.renameIfExists]);
+        return { fileids: [12], metadata: [{ fileid: 12, path: '/Sync/docs/a.txt', parentfolderid: 44, mtime: Math.trunc(info.mtimeMs / 1000) }] };
+      }
+    })
+  });
+
+  const result = await engine.resolveMtimeMismatch({ key: 'docs/a.txt', action: 'upload_local' });
+  const updated = await store.getFile('docs/a.txt');
+
+  assert.equal(result.resolved, true);
+  assert.deepEqual(calls, [
+    ['ensureFolder', '/Sync/docs'],
+    ['uploadFile', 'a.txt', 44, false]
+  ]);
+  assert.equal(updated.mtimeMismatch, false);
+  assert.equal(updated.mtimeMismatchStatus, 'matched');
+  assert.equal(updated.pcloudFileId, 12);
+});
+
+test('SyncEngine resolves a content mismatch by downloading pCloud over the local file', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'a.txt');
+  await writeFile(filePath, 'local');
+  const calls = [];
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/a.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'a.txt',
+    remotePath: '/Sync/docs/a.txt',
+    pcloudPath: '/Sync/docs/a.txt',
+    pcloudFileId: 11,
+    status: 'existing',
+    size: 5,
+    mtimeMismatch: true,
+    mtimeMismatchStatus: 'mismatched'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      downloadFile: async ({ fileid, filePath: targetPath }) => {
+        calls.push(['downloadFile', fileid]);
+        await writeFile(targetPath, 'remote');
+        return { bytes: 6 };
+      }
+    })
+  });
+
+  const result = await engine.resolveMtimeMismatch({ key: 'docs/a.txt', action: 'download_remote' });
+  const updated = await store.getFile('docs/a.txt');
+
+  assert.equal(result.resolved, true);
+  assert.deepEqual(calls, [['downloadFile', 11]]);
+  assert.equal(await readFile(filePath, 'utf8'), 'remote');
+  assert.equal(updated.size, 6);
+  assert.equal(updated.mtimeMismatch, false);
+  assert.equal(updated.mtimeMismatchStatus, 'matched');
+});
+
 test('SyncEngine can verify an apparent upload failure by checksum and mark the file synced', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));

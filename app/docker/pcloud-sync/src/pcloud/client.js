@@ -8,6 +8,8 @@ import { pipeline } from 'node:stream/promises';
 
 const OFFICIAL_HOSTS = new Set(['api.pcloud.com', 'eapi.pcloud.com']);
 const TRANSIENT_RETRY_DELAYS_MS = [250, 1000];
+const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 120000;
 
 export function validatePCloudHostname(hostname) {
   const value = String(hostname || '').trim();
@@ -21,13 +23,20 @@ export function validatePCloudHostname(hostname) {
 }
 
 export class PCloudClient {
-  constructor({ hostname = 'api.pcloud.com', accessToken = '' } = {}) {
+  constructor({ hostname = 'api.pcloud.com', accessToken = '', requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, downloadTimeoutMs = DEFAULT_DOWNLOAD_TIMEOUT_MS } = {}) {
     this.hostname = validatePCloudHostname(hostname);
     this.accessToken = accessToken;
+    this.requestTimeoutMs = Number(requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS);
+    this.downloadTimeoutMs = Number(downloadTimeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS);
   }
 
   withHostname(hostname) {
-    return new PCloudClient({ hostname, accessToken: this.accessToken });
+    return new PCloudClient({
+      hostname,
+      accessToken: this.accessToken,
+      requestTimeoutMs: this.requestTimeoutMs,
+      downloadTimeoutMs: this.downloadTimeoutMs
+    });
   }
 
   async exchangeCode({ clientId, clientSecret, code }) {
@@ -161,18 +170,25 @@ export class PCloudClient {
     }
     const link = await this.getFileLink({ fileid, path: remotePath });
     const url = downloadUrl(link, this.urlFor('/'));
-    const response = await fetch(url);
-    if (!response.ok || !response.body) {
-      throw new Error(`pCloud download failed: ${response.status}`);
+    const timeout = fetchTimeout(this.downloadTimeoutMs, 'pCloud download');
+    try {
+      const response = await fetch(url, { signal: timeout.signal });
+      if (!response.ok || !response.body) {
+        throw new Error(`pCloud download failed: ${response.status}`);
+      }
+      let downloaded = 0;
+      const readable = Readable.fromWeb(response.body);
+      readable.on('data', (chunk) => {
+        downloaded += chunk.length;
+        onProgress?.(downloaded, Number(response.headers.get('content-length') || 0));
+      });
+      await pipeline(readable, createWriteStream(filePath));
+      return { bytes: downloaded };
+    } catch (error) {
+      throw timeoutError(error, this.downloadTimeoutMs, 'pCloud download');
+    } finally {
+      timeout.clear();
     }
-    let downloaded = 0;
-    const readable = Readable.fromWeb(response.body);
-    readable.on('data', (chunk) => {
-      downloaded += chunk.length;
-      onProgress?.(downloaded, Number(response.headers.get('content-length') || 0));
-    });
-    await pipeline(readable, createWriteStream(filePath));
-    return { bytes: downloaded };
   }
 
   async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, renameIfExists = false, onProgress, signal }) {
@@ -211,15 +227,22 @@ export class PCloudClient {
     }
     url.search = search.toString();
 
-    const response = await fetch(url);
-    const body = await response.json();
-    if (!response.ok || body.result !== 0) {
-      const error = new Error(body.error || `pCloud API request failed: ${method}`);
-      error.result = body.result;
-      error.statusCode = response.status;
-      throw error;
+    const timeout = fetchTimeout(this.requestTimeoutMs, `pCloud API request ${method}`);
+    try {
+      const response = await fetch(url, { signal: timeout.signal });
+      const body = await response.json();
+      if (!response.ok || body.result !== 0) {
+        const error = new Error(body.error || `pCloud API request failed: ${method}`);
+        error.result = body.result;
+        error.statusCode = response.status;
+        throw error;
+      }
+      return body;
+    } catch (error) {
+      throw timeoutError(error, this.requestTimeoutMs, `pCloud API request ${method}`);
+    } finally {
+      timeout.clear();
     }
-    return body;
   }
 
   async multipartUpload(urlPath, fields, filePath, filename, onProgress = null, signal = null) {
@@ -451,6 +474,22 @@ function uploadStoppedError() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function fetchTimeout(timeoutMs, label) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeout)
+  };
+}
+
+function timeoutError(error, timeoutMs, label) {
+  if (isAbortError(error) || error === error?.cause || /aborted|timed out/i.test(String(error?.message || ''))) {
+    return new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`);
+  }
+  return error;
 }
 
 function downloadUrl(link, baseUrl) {

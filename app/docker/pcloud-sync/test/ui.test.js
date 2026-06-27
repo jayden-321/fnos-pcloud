@@ -69,6 +69,8 @@ test('settings exposes pCloud upload and download speed test controls', async ()
   assert.match(html, /下载速度/);
   assert.match(script, /startSpeedTest/);
   assert.match(script, /renderSpeedTest/);
+  assert.match(script, /formatProgress/);
+  assert.match(script, /downloadProgress/);
   assert.match(script, /\/api\/speed-test/);
 });
 
@@ -161,10 +163,15 @@ test('task cards expose a compact mtime verification menu and details dialog', a
   assert.match(script, /查看校验失败/);
   assert.match(script, /loadMtimeMismatchDetails/);
   assert.match(script, /stopMtimeMismatchVerification/);
+  assert.match(script, /resolveMtimeMismatch/);
+  assert.match(script, /data-mtime-resolution="upload_local"/);
+  assert.match(script, /data-mtime-resolution="download_remote"/);
+  assert.match(script, /\/api\/mtime-mismatches\/resolve/);
   assert.match(script, /\/api\/verify-mtime-mismatches\/stop/);
   assert.match(script, /\/api\/mtime-mismatches/);
   assert.match(styles, /task-action-select/);
   assert.match(styles, /mtime-details-table/);
+  assert.match(styles, /resolution-actions/);
 });
 
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {

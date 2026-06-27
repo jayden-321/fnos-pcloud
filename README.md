@@ -127,15 +127,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.4.0 is one-way upload only, not two-way sync.
-- v0.4.0 does not propagate local deletions to pCloud.
-- v0.4.0 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.4.1 is one-way upload only, not two-way sync.
+- v0.4.1 does not propagate local deletions to pCloud.
+- v0.4.1 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.4.1: Adds explicit resolution actions for verified mtime content mismatches. The mismatch detail dialog can upload the local file over pCloud or download the pCloud file over the local copy. The pCloud speed test now reports upload/download progress and times out stalled API/download requests instead of staying in the downloading phase forever.
 - v0.4.0: Adds timezone-aware daily and weekly task schedules, a Settings field for the scheduler timezone, Node.js 22.13 as the documented runtime baseline for `node:sqlite`, and a repository design-system reference generated from the Claude Design work.
 - v0.3.9: Adds pause support for long mtime-mismatch verification jobs. Running verification menus now expose Pause Verification, stop taking new checksum work after the current in-flight requests finish, preserve completed SQLite results, and allow the next run to continue remaining files.
 - v0.3.8: Adds a pCloud speed test tool that generates a temporary test file, uploads it, downloads it through `getfilelink`, verifies the downloaded checksum, reports upload and download throughput, and cleans up local and remote temporary files outside sync tasks.

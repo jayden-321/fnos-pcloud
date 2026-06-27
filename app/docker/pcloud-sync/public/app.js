@@ -60,6 +60,14 @@ document.body.addEventListener('change', (event) => {
   handleMtimeMenu(menu);
 });
 
+document.body.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-mtime-resolution]');
+  if (!button) {
+    return;
+  }
+  await resolveMtimeMismatch(button);
+});
+
 document.querySelector('#createTask').addEventListener('click', () => {
   addTaskEditor();
   showTab('settings');
@@ -389,10 +397,38 @@ async function loadMtimeMismatchDetails(taskId, status) {
       <td>${formatBytes(file.size || 0)}</td>
       <td>${escapeHtml(mtimeStatusText(file.status))}</td>
       <td>${escapeHtml(formatDateTime(file.verifiedAt))}</td>
-      <td>${escapeHtml(file.error || file.remotePath || '')}</td>
+      <td>${escapeHtml(file.error || file.remotePath || '')}${status === 'mismatched' ? mismatchResolutionActions(body.taskId, file) : ''}</td>
     </tr>
   `).join('') || '<tr><td colspan="5">暂无文件</td></tr>';
   mtimeDetailsDialog.showModal();
+}
+
+async function resolveMtimeMismatch(button) {
+  const action = button.dataset.mtimeResolution;
+  const key = button.dataset.key;
+  const taskId = button.dataset.taskId || '';
+  button.disabled = true;
+  try {
+    await post('/api/mtime-mismatches/resolve', { key, action });
+    await refreshStatus();
+    await loadMtimeMismatchDetails(taskId, 'mismatched');
+    show(action === 'upload_local' ? '已上传本地文件覆盖远端' : '已下载远端文件覆盖本地');
+  } catch (error) {
+    show(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function mismatchResolutionActions(taskId, file) {
+  const key = escapeHtml(file.key);
+  const sourceId = escapeHtml(taskId || file.sourceId || '');
+  return `
+    <div class="resolution-actions">
+      <button type="button" data-mtime-resolution="upload_local" data-key="${key}" data-task-id="${sourceId}">上传本地</button>
+      <button type="button" data-mtime-resolution="download_remote" data-key="${key}" data-task-id="${sourceId}">下载远端</button>
+    </div>
+  `;
 }
 
 function scanModeText(scanMode) {
@@ -756,6 +792,8 @@ function renderSpeedTest(speedTest) {
     <span>大小：${escapeHtml(formatBytes(speedTest.sizeBytes || 0))}</span>
     <span>上传速度：${escapeHtml(speedTest.upload ? formatBytesPerSecond(speedTest.upload.bytesPerSecond) : '--')}</span>
     <span>下载速度：${escapeHtml(speedTest.download ? formatBytesPerSecond(speedTest.download.bytesPerSecond) : '--')}</span>
+    ${speedTest.uploadProgress ? `<span>上传进度：${escapeHtml(formatProgress(speedTest.uploadProgress))}</span>` : ''}
+    ${speedTest.downloadProgress ? `<span>下载进度：${escapeHtml(formatProgress(speedTest.downloadProgress))}</span>` : ''}
     <span>校验：${speedTest.checksumMatched ? '通过' : speedTest.phase === 'completed' ? '失败' : '--'}</span>
     ${speedTest.error ? `<span class="danger">错误：${escapeHtml(speedTest.error)}</span>` : ''}
   `;
@@ -774,6 +812,10 @@ function speedTestPhaseText(phase, running) {
     completed: '完成',
     failed: '失败'
   }[phase] || '未测试';
+}
+
+function formatProgress(progress) {
+  return `${formatBytes(progress.bytes || 0)} / ${formatBytes(progress.totalBytes || 0)} · ${progress.percent || 0}% · ${formatBytesPerSecond(progress.bytesPerSecond || 0)}`;
 }
 
 function formatBytesPerSecond(bytes) {
