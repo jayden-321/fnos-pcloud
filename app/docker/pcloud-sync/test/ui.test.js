@@ -110,9 +110,12 @@ test('task cards show scan source labels from engine queue state', async () => {
   const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 
   assert.match(script, /scanModeText/);
+  assert.match(script, /scanDetailText/);
   assert.match(script, /远端全量比对/);
   assert.match(script, /本地缓存/);
   assert.match(script, /扫描依据/);
+  assert.match(script, /本地扫描/);
+  assert.match(script, /远端列举/);
 });
 
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {

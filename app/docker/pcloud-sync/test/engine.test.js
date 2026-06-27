@@ -304,7 +304,13 @@ test('SyncEngine persists scan source, pCloud folder id, file ids, and diff curs
   assert.equal(remoteState.remoteFolderId, 42);
   assert.equal(remoteState.diffid, 555);
   assert.equal(remoteState.lastScanMode, 'remote_full');
+  assert.equal(remoteState.lastDiscovered, 1);
+  assert.equal(remoteState.lastRemoteFiles, 1);
+  assert.equal(typeof remoteState.lastLocalScanMs, 'number');
+  assert.equal(typeof remoteState.lastRemoteScanMs, 'number');
+  assert.equal(typeof result.taskResults[0].totalScanMs, 'number');
   assert.ok(events.some((event) => event.type === 'scan_completed' && event.message.includes('remote_full')));
+  assert.ok(events.some((event) => event.type === 'scan_completed' && event.message.includes('timings Docs:local')));
 });
 
 test('SyncEngine uses pCloud diff cursor to validate cached scans without full remote listing', async () => {

@@ -127,15 +127,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.3.2 is one-way upload only, not two-way sync.
-- v0.3.2 does not propagate local deletions to pCloud.
-- v0.3.2 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.3.3 is one-way upload only, not two-way sync.
+- v0.3.3 does not propagate local deletions to pCloud.
+- v0.3.3 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.3.3: Tightens first-scan remote matching and adds scan diagnostics. Full pCloud comparisons now require matching modified times when pCloud provides reliable `mtime` metadata; same-path same-size fallback is only used when remote `mtime` is unavailable. Task cards and scan logs now show local scan count, remote file count, and local/remote/diff timings so unexpectedly fast remote comparisons are visible.
 - v0.3.2: Hardens scan and upload edge cases based on the official pCloud sync-library patterns. Remote scan failures now preserve the previous SQLite file state, pCloud `diff` reads continue across pages until the cursor is caught up, transient upload errors are verified with `stat` and `checksumfile` before fallback re-upload, queued files that changed after scanning are delayed instead of uploaded with stale metadata, and root Docker builds ignore SQLite runtime state.
 - v0.3.1: Adds pCloud API based scan transparency and upload hardening in one package. Task cards now retain the last scan source after refresh, scans can use pCloud `diff` cursors before trusting local cache, remote task state stores folder IDs, file IDs, and diff IDs, `uploadfile` can optionally pass `renameifexists`, selected upload server failures fall back to the configured API host, and optional `checksumfile` verification supports failed, sampled, or all uploads.
 - v0.3.0: Replaces JSON runtime state with a fresh SQLite state database. New installs use `/data/state.sqlite` for config, file records, and logs; legacy `state.json` is not imported, so deleting app data starts from a clean state. Requires Node.js 22.5 or newer for `node:sqlite`.

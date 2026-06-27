@@ -293,6 +293,10 @@ export class SyncEngine {
           scanRebuildFailed = true;
           break;
         }
+        const taskStartedAtMs = Date.now();
+        let localScanMs = 0;
+        let remoteScanMs = 0;
+        let diffScanMs = 0;
         this.currentTaskId = source.id;
         this.currentTaskName = source.name;
         const taskResult = this.taskQueue.find((item) => item.id === source.id);
@@ -302,8 +306,11 @@ export class SyncEngine {
         });
         let discovered = [];
         try {
+          const startedAt = Date.now();
           discovered = await scanSource(source, config.sync.ignorePatterns);
+          localScanMs = Date.now() - startedAt;
         } catch (error) {
+          localScanMs = Date.now() - taskStartedAtMs;
           await this.store.addEvent('scan_failed', source.localPath, error.message);
           scanRebuildFailed = true;
           result.failed += 1;
@@ -332,7 +339,9 @@ export class SyncEngine {
 
         if (client?.diff && !needsRemoteListing) {
           try {
+            const startedAt = Date.now();
             const diff = await fetchPCloudDiff(client, nextDiffid);
+            diffScanMs = Date.now() - startedAt;
             scanMode = 'remote_diff';
             nextDiffid = Number(diff.diffid || nextDiffid || 0) || null;
             diffTouchedTask = diffTouchesTask(diff.entries ?? [], source, previousRemoteState, known);
@@ -348,7 +357,9 @@ export class SyncEngine {
 
         if (client && (needsRemoteListing || diffTouchedTask)) {
           try {
+            const startedAt = Date.now();
             const remoteTree = await listRemoteTree(client, source.remotePath);
+            remoteScanMs = Date.now() - startedAt;
             remoteFiles = remoteTree.files;
             remoteFolder = remoteTree.folder;
             if (client.diff && !nextDiffid) {
@@ -387,7 +398,10 @@ export class SyncEngine {
           remoteFiles: remoteFiles?.size ?? 0,
           queued: plan.pending.length,
           existing: existingCount,
-          scanMode
+          scanMode,
+          localScanMs,
+          remoteScanMs,
+          diffScanMs
         });
 
         const plannedFiles = [];
@@ -414,7 +428,12 @@ export class SyncEngine {
           diffid: nextDiffid ?? previousRemoteState.diffid ?? null,
           lastScanMode: scanMode,
           lastScanAt: new Date().toISOString(),
-          lastFullRemoteScanAt: remoteFiles ? new Date().toISOString() : previousRemoteState.lastFullRemoteScanAt
+          lastFullRemoteScanAt: remoteFiles ? new Date().toISOString() : previousRemoteState.lastFullRemoteScanAt,
+          lastDiscovered: discovered.length,
+          lastRemoteFiles: remoteFiles?.size ?? 0,
+          lastLocalScanMs: localScanMs,
+          lastRemoteScanMs: remoteScanMs,
+          lastDiffScanMs: diffScanMs
         });
 
         if (config.pcloud.accessToken && !this.stopRequested) {
@@ -439,6 +458,7 @@ export class SyncEngine {
               : taskResult.queued > taskResult.uploaded
                 ? 'pending'
                 : 'completed',
+          totalScanMs: Date.now() - taskStartedAtMs,
           finishedAt: new Date().toISOString()
         });
         result.taskResults.push(structuredClone(taskResult));
@@ -450,7 +470,10 @@ export class SyncEngine {
         await this.store.pruneFilesExcept(plannedKeys);
       }
       const scanModes = result.taskResults.map((task) => `${task.name}:${task.scanMode || 'unknown'}`).join(', ');
-      await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.remoteFiles} remote, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed; scanMode ${scanModes}`);
+      const scanTimings = result.taskResults
+        .map((task) => `${task.name}:local ${task.localScanMs ?? 0}ms remote ${task.remoteScanMs ?? 0}ms diff ${task.diffScanMs ?? 0}ms total ${task.totalScanMs ?? 0}ms`)
+        .join(', ');
+      await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.remoteFiles} remote, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed; scanMode ${scanModes}; timings ${scanTimings}`);
       return result;
     } catch (error) {
       this.lastError = error.message;

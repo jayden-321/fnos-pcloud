@@ -256,6 +256,7 @@ function renderTaskCards() {
     const stats = taskStats.stats || emptyStats();
     const status = taskStatusText({ queue, stats, counts });
     const scanMode = scanModeText(queue?.scanMode || taskStats.remoteState?.lastScanMode);
+    const scanDetails = scanDetailText(queue, taskStats.remoteState);
     return `
       <article class="task-card">
         <div class="task-card-main">
@@ -263,6 +264,7 @@ function renderTaskCards() {
             <h3>${escapeHtml(task.name)}</h3>
             <p class="${counts.failed > 0 ? 'danger' : 'success'}">${escapeHtml(status)}</p>
             ${scanMode ? `<p class="task-scan-mode">扫描依据：${escapeHtml(scanMode)}</p>` : ''}
+            ${scanDetails ? `<p class="task-scan-detail">${escapeHtml(scanDetails)}</p>` : ''}
             <div class="task-stat-grid">
               <span>总 ${formatNumber(stats.total)}</span>
               <span>已存在 ${formatNumber(stats.existing || 0)}</span>
@@ -301,6 +303,31 @@ function scanModeText(scanMode) {
     cache: '本地缓存',
     remote_diff: '远端增量'
   }[scanMode] || '';
+}
+
+function scanDetailText(queue, remoteState) {
+  const discovered = queue?.discovered ?? remoteState?.lastDiscovered;
+  const remoteFiles = queue?.remoteFiles ?? remoteState?.lastRemoteFiles;
+  const localMs = queue?.localScanMs ?? remoteState?.lastLocalScanMs;
+  const remoteMs = queue?.remoteScanMs ?? remoteState?.lastRemoteScanMs;
+  const diffMs = queue?.diffScanMs ?? remoteState?.lastDiffScanMs;
+  const parts = [];
+  if (Number.isFinite(Number(discovered))) {
+    parts.push(`本地 ${formatNumber(discovered)}`);
+  }
+  if (Number.isFinite(Number(remoteFiles))) {
+    parts.push(`远端 ${formatNumber(remoteFiles)}`);
+  }
+  if (Number.isFinite(Number(localMs))) {
+    parts.push(`本地扫描 ${formatDuration(localMs)}`);
+  }
+  if (Number.isFinite(Number(remoteMs)) && Number(remoteMs) > 0) {
+    parts.push(`远端列举 ${formatDuration(remoteMs)}`);
+  }
+  if (Number.isFinite(Number(diffMs)) && Number(diffMs) > 0) {
+    parts.push(`远端增量 ${formatDuration(diffMs)}`);
+  }
+  return parts.join(' · ');
 }
 
 function taskQueueCounts(taskId) {
@@ -565,6 +592,14 @@ function formatBytesPerSecond(bytes) {
     return `${(value / 1024).toFixed(1)} KB/s`;
   }
   return `${Math.round(value)} B/s`;
+}
+
+function formatDuration(ms) {
+  const value = Number(ms || 0);
+  if (value < 1000) {
+    return `${Math.max(0, Math.round(value))}ms`;
+  }
+  return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`;
 }
 
 async function get(url) {
