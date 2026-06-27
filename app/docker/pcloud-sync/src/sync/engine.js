@@ -846,6 +846,82 @@ export class SyncEngine {
     };
   }
 
+  async verifyMtimeMismatchSample({ taskId = '', limit = 20 } = {}) {
+    const config = normalizeConfig(await this.store.loadConfig() ?? {});
+    const normalizedTaskId = String(taskId || '').trim();
+    const sampleLimit = Math.max(1, Math.min(100, Number(limit || 20)));
+    const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
+    if (!client?.checksumFile) {
+      return { skipped: true, reason: 'pCloud checksumfile unavailable', totalCandidates: 0, checked: 0, matched: 0, mismatched: 0, failed: 0, results: [] };
+    }
+
+    const filter = { status: 'existing' };
+    if (normalizedTaskId) {
+      filter.sourceId = normalizedTaskId;
+    }
+    const candidates = (await this.store.listFiles(filter))
+      .filter((file) => file.mtimeMismatch === true)
+      .filter((file) => file.absolutePath && (file.pcloudFileId || file.pcloudPath || file.remotePath))
+      .sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    const sample = candidates.slice(0, sampleLimit);
+    const summary = {
+      skipped: false,
+      taskId: normalizedTaskId,
+      totalCandidates: candidates.length,
+      checked: 0,
+      matched: 0,
+      mismatched: 0,
+      failed: 0,
+      results: []
+    };
+
+    for (const file of sample) {
+      const target = {
+        fileid: file.pcloudFileId,
+        path: file.pcloudFileId ? '' : file.pcloudPath || file.remotePath
+      };
+      try {
+        const verification = await this.verifyRemoteFileChecksum(client, file, target);
+        const result = {
+          key: file.key,
+          status: 'matched',
+          sha1: verification?.sha1 ?? '',
+          verifiedAt: verification?.verifiedAt ?? new Date().toISOString()
+        };
+        await this.store.setStatus(file.key, file.status, {
+          checksumSha1: result.sha1,
+          checksumVerifiedAt: result.verifiedAt,
+          checksumSampleStatus: 'matched'
+        });
+        summary.checked += 1;
+        summary.matched += 1;
+        summary.results.push(result);
+      } catch (error) {
+        const isMismatch = /checksum verification failed/i.test(error.message || '');
+        const result = {
+          key: file.key,
+          status: isMismatch ? 'mismatched' : 'failed',
+          error: error.message
+        };
+        await this.store.setStatus(file.key, file.status, {
+          checksumSampleStatus: result.status,
+          checksumSampleError: error.message,
+          checksumVerifiedAt: new Date().toISOString()
+        });
+        summary.checked += 1;
+        if (isMismatch) {
+          summary.mismatched += 1;
+        } else {
+          summary.failed += 1;
+        }
+        summary.results.push(result);
+      }
+    }
+
+    await this.store.addEvent('mtime_sample_verified', normalizedTaskId || 'all', `${summary.checked}/${summary.totalCandidates} checked, ${summary.matched} matched, ${summary.mismatched} mismatched, ${summary.failed} failed`);
+    return summary;
+  }
+
   recordUploadProgress(key, chunkBytes, totalBytes = 0) {
     const now = Date.now();
     const current = this.activeUploads.get(key) ?? {

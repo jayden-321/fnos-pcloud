@@ -133,6 +133,31 @@ test('HTTP API passes force remote scan requests to manual scans', async () => {
   assert.deepEqual(scanOptions, { taskIds: [], trigger: 'manual', forceRemoteScan: true });
 });
 
+test('HTTP API verifies a sample of mtime-mismatched files', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-mtime-sample-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  let verifyOptions = null;
+
+  const app = createApp({
+    store,
+    engine: {
+      verifyMtimeMismatchSample: async (options) => {
+        verifyOptions = options;
+        return { totalCandidates: 9, checked: 3, matched: 3, mismatched: 0, failed: 0, results: [] };
+      }
+    }
+  });
+  const response = await app.fetch(new Request('http://local/api/verify-mtime-mismatch-sample', {
+    method: 'POST',
+    body: JSON.stringify({ taskId: 'docs', limit: 3 })
+  }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(verifyOptions, { taskId: 'docs', limit: 3 });
+  assert.equal((await response.json()).checked, 3);
+});
+
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
   const store = new SqliteStore(dir);

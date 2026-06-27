@@ -158,6 +158,17 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     }));
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/verify-mtime-mismatch-sample') {
+    const body = await readJsonBody(request);
+    if (!engine.verifyMtimeMismatchSample) {
+      return json({ error: 'Mtime mismatch sample verification is unavailable' }, 501);
+    }
+    return json(await engine.verifyMtimeMismatchSample({
+      taskId: String(body.taskId || '').trim(),
+      limit: Number(body.limit || 20)
+    }));
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/stop') {
     if (!engine.requestStop) {
       return json({ stopping: false, activeUploads: 0 });

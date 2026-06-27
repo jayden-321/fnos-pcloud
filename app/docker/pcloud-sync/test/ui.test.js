@@ -117,6 +117,8 @@ test('task cards show scan source labels from engine queue state', async () => {
   assert.match(script, /本地扫描/);
   assert.match(script, /远端列举/);
   assert.match(script, /时间不同/);
+  assert.match(script, /verify-mtime/);
+  assert.match(script, /verifyMtimeMismatchSample/);
 });
 
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {

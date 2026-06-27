@@ -47,6 +47,10 @@ document.body.addEventListener('click', (event) => {
   if (button && !button.classList.contains('nav-item')) {
     showTab(button.dataset.tab);
   }
+  const actionButton = event.target.closest('button[data-action="verify-mtime"]');
+  if (actionButton) {
+    verifyMtimeMismatchSample(actionButton.dataset.taskId);
+  }
 });
 
 document.querySelector('#createTask').addEventListener('click', () => {
@@ -257,6 +261,7 @@ function renderTaskCards() {
     const status = taskStatusText({ queue, stats, counts });
     const scanMode = scanModeText(queue?.scanMode || taskStats.remoteState?.lastScanMode);
     const scanDetails = scanDetailText(queue, taskStats.remoteState);
+    const mtimeMismatches = Number(queue?.mtimeMismatches ?? taskStats.remoteState?.lastMtimeMismatches ?? 0);
     return `
       <article class="task-card">
         <div class="task-card-main">
@@ -275,6 +280,7 @@ function renderTaskCards() {
           </div>
           <div class="task-card-actions">
             <button type="button" data-tab="logs">查看日志</button>
+            ${mtimeMismatches > 0 ? `<button type="button" data-action="verify-mtime" data-task-id="${escapeHtml(task.id)}">抽样校验</button>` : ''}
             <button type="button" data-tab="settings">编辑</button>
           </div>
         </div>
@@ -295,6 +301,16 @@ async function runScan({ forceRemoteScan = false } = {}) {
   show(scanResult.skipped
     ? '没有可扫描的同步任务'
     : forceRemoteScan ? '远端重新比对已触发' : '扫描已触发');
+}
+
+async function verifyMtimeMismatchSample(taskId) {
+  const result = await post('/api/verify-mtime-mismatch-sample', { taskId, limit: 20 });
+  await refreshStatus();
+  if (result.skipped) {
+    show(result.reason || '抽样校验不可用');
+    return;
+  }
+  show(`抽样 ${result.checked}/${result.totalCandidates}：匹配 ${result.matched}，不一致 ${result.mismatched}，失败 ${result.failed}`);
 }
 
 function scanModeText(scanMode) {

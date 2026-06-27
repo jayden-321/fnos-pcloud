@@ -127,15 +127,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.3.4 is one-way upload only, not two-way sync.
-- v0.3.4 does not propagate local deletions to pCloud.
-- v0.3.4 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.3.5 is one-way upload only, not two-way sync.
+- v0.3.5 does not propagate local deletions to pCloud.
+- v0.3.5 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.3.5: Adds mtime-mismatch sample verification. Task cards now show an on-demand sample check for files that were adopted by path and size but have different mtimes; the check calls pCloud `checksumfile` and compares local SHA-1 without re-uploading files, reporting matched, mismatched, and failed counts.
 - v0.3.4: Refines first-run takeover semantics. Full pCloud comparisons now adopt same-path same-size remote files as Existing even when mtimes differ, while storing the remote mtime and an mtime-mismatch diagnostic count. Later scans still use the local SQLite snapshot to upload same-size files when the local mtime changes, so existing-folder takeover avoids unnecessary uploads without hiding future local edits.
 - v0.3.3: Tightens first-scan remote matching and adds scan diagnostics. Full pCloud comparisons now require matching modified times when pCloud provides reliable `mtime` metadata; same-path same-size fallback is only used when remote `mtime` is unavailable. Task cards and scan logs now show local scan count, remote file count, and local/remote/diff timings so unexpectedly fast remote comparisons are visible.
 - v0.3.2: Hardens scan and upload edge cases based on the official pCloud sync-library patterns. Remote scan failures now preserve the previous SQLite file state, pCloud `diff` reads continue across pages until the cursor is caught up, transient upload errors are verified with `stat` and `checksumfile` before fallback re-upload, queued files that changed after scanning are delayed instead of uploaded with stale metadata, and root Docker builds ignore SQLite runtime state.
