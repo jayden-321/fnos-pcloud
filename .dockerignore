@@ -6,6 +6,8 @@ work
 .data
 data
 state.json
+state.sqlite
+state.sqlite-*
 .env
 *.fpk
 *.zip

@@ -8,6 +8,7 @@ import { isIgnored, scanSource } from '../scanner/scanner.js';
 import { planUploads } from './planner.js';
 
 const MIN_UPLOAD_SPEED_SAMPLE_MS = 500;
+const PCLOUD_DIFF_LIMIT = 1000;
 
 export class SyncEngine {
   constructor({ store, pcloudFactory } = {}) {
@@ -259,7 +260,6 @@ export class SyncEngine {
         this.taskQueue = [];
         return { skipped: true, reason: 'no enabled tasks' };
       }
-      await this.store.clearFiles(requestedTaskIds.length > 0 ? { sourceIds: requestedTaskIds } : {});
       const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
       const result = {
         discovered: 0,
@@ -285,9 +285,12 @@ export class SyncEngine {
         stopped: 0,
         scanMode: ''
       }));
+      const plannedKeys = new Set();
+      let scanRebuildFailed = false;
 
       for (const source of tasks) {
         if (this.stopRequested) {
+          scanRebuildFailed = true;
           break;
         }
         this.currentTaskId = source.id;
@@ -302,6 +305,7 @@ export class SyncEngine {
           discovered = await scanSource(source, config.sync.ignorePatterns);
         } catch (error) {
           await this.store.addEvent('scan_failed', source.localPath, error.message);
+          scanRebuildFailed = true;
           result.failed += 1;
           Object.assign(taskResult, {
             status: 'failed',
@@ -328,7 +332,7 @@ export class SyncEngine {
 
         if (client?.diff && !needsRemoteListing) {
           try {
-            const diff = await client.diff(nextDiffid ? { diffid: nextDiffid, limit: 1000 } : { last: 0 });
+            const diff = await fetchPCloudDiff(client, nextDiffid);
             scanMode = 'remote_diff';
             nextDiffid = Number(diff.diffid || nextDiffid || 0) || null;
             diffTouchedTask = diffTouchesTask(diff.entries ?? [], source, previousRemoteState, known);
@@ -348,11 +352,12 @@ export class SyncEngine {
             remoteFiles = remoteTree.files;
             remoteFolder = remoteTree.folder;
             if (client.diff && !nextDiffid) {
-              const diff = await client.diff({ last: 0 });
+              const diff = await fetchPCloudDiff(client, null);
               nextDiffid = Number(diff.diffid || 0) || null;
             }
           } catch (error) {
             await this.store.addEvent('remote_scan_failed', source.name, error.message);
+            scanRebuildFailed = true;
             result.failed += 1;
             Object.assign(taskResult, {
               status: 'failed',
@@ -399,6 +404,9 @@ export class SyncEngine {
           const existing = known.get(file.key) ?? {};
           plannedFiles.push(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles)));
         }
+        for (const file of plannedFiles) {
+          plannedKeys.add(file.key);
+        }
         await this.store.replaceFilesForSources([source.id], plannedFiles);
         await this.store.setTaskRemoteState?.(source.id, {
           remotePath: source.remotePath,
@@ -438,6 +446,9 @@ export class SyncEngine {
       }
 
       this.lastRunAt = new Date().toISOString();
+      if (requestedTaskIds.length === 0 && !scanRebuildFailed) {
+        await this.store.pruneFilesExcept(plannedKeys);
+      }
       const scanModes = result.taskResults.map((task) => `${task.name}:${task.scanMode || 'unknown'}`).join(', ');
       await this.store.addEvent('scan_completed', 'sync', `${result.discovered} discovered, ${result.remoteFiles} remote, ${result.existing} existing, ${result.uploaded} uploaded, ${result.failed} failed; scanMode ${scanModes}`);
       return result;
@@ -598,6 +609,11 @@ export class SyncEngine {
         return;
       }
       try {
+        const stability = await this.refreshFileBeforeUpload(file);
+        if (stability.delayed) {
+          await this.store.addEvent('upload_delayed', file.key, stability.reason, { size: stability.size });
+          return;
+        }
         await this.store.setStatus(file.key, 'uploading');
         const controller = new AbortController();
         this.activeUploads.set(file.key, {
@@ -618,7 +634,7 @@ export class SyncEngine {
           fallbackClient: baseClient,
           controller
         });
-        const verification = await this.verifySuccessfulUpload(upload.client, file, upload, normalized.sync);
+        const verification = upload.verifiedAfterError ?? await this.verifySuccessfulUpload(upload.client, file, upload, normalized.sync);
         await this.store.setStatus(file.key, 'synced', {
           error: '',
           pcloudFileId: upload.pcloudFileId,
@@ -629,7 +645,7 @@ export class SyncEngine {
           checksumVerifiedAt: verification?.verifiedAt ?? '',
           syncedAt: new Date().toISOString()
         });
-        await this.store.addEvent('upload_succeeded', file.key, upload.pcloudPath, { size: Number(file.size || 0) });
+        await this.store.addEvent(upload.verifiedAfterError ? 'upload_verified_after_error' : 'upload_succeeded', file.key, upload.pcloudPath, { size: Number(file.size || 0) });
         uploaded += 1;
       } catch (error) {
         if (this.stopRequested || isStopError(error)) {
@@ -676,9 +692,57 @@ export class SyncEngine {
       if (!fallbackClient || fallbackClient === primaryClient || !isTransientUploadError(error)) {
         throw error;
       }
+      const verified = await this.verifyAfterUploadError(primaryClient, file, config.sync).catch(() => null);
+      if (verified) {
+        return {
+          client: primaryClient,
+          response: null,
+          metadata: { fileid: verified.pcloudFileId, path: verified.pcloudPath },
+          folder: { folderid: verified.pcloudFolderId },
+          pcloudFileId: verified.pcloudFileId,
+          pcloudPath: verified.pcloudPath,
+          verifiedAfterError: verified
+        };
+      }
       await this.store.addEvent('server_fallback', file.key, error.message, { size: Number(file.size || 0) });
       return this.uploadFileOnce({ config, file, client: fallbackClient, controller });
     }
+  }
+
+  async refreshFileBeforeUpload(file) {
+    let info;
+    try {
+      info = await stat(file.absolutePath);
+    } catch (error) {
+      return { delayed: false };
+    }
+    if (!info.isFile()) {
+      return { delayed: false };
+    }
+
+    const size = Number(info.size || 0);
+    const mtimeMs = Math.trunc(info.mtimeMs);
+    const hasScanSnapshot = Number(file.mtimeMs || 0) > 0;
+    if (!hasScanSnapshot) {
+      return { delayed: false };
+    }
+    if (size === Number(file.size || 0) && mtimeMs === Number(file.mtimeMs || 0)) {
+      return { delayed: false };
+    }
+
+    await this.store.upsertFile({
+      ...file,
+      size,
+      mtimeMs,
+      mtime: Math.trunc(mtimeMs / 1000),
+      status: 'pending',
+      error: 'File changed after scan; upload delayed'
+    });
+    return {
+      delayed: true,
+      reason: 'File changed after scan; upload delayed',
+      size
+    };
   }
 
   async uploadFileOnce({ config, file, client, controller }) {
@@ -904,6 +968,24 @@ async function listRemoteTree(client, remotePath) {
     return { folder: null, files: await client.listRemoteFiles(remotePath) };
   }
   return { folder: null, files: new Map() };
+}
+
+async function fetchPCloudDiff(client, diffid) {
+  let cursor = Number(diffid || 0) || null;
+  let latestDiffid = cursor;
+  const entries = [];
+
+  while (true) {
+    const params = cursor ? { diffid: cursor, limit: PCLOUD_DIFF_LIMIT } : { last: 0 };
+    const response = await client.diff(params);
+    const pageEntries = Array.isArray(response.entries) ? response.entries : [];
+    entries.push(...pageEntries);
+    latestDiffid = Number(response.diffid || latestDiffid || 0) || null;
+    if (pageEntries.length < PCLOUD_DIFF_LIMIT || !latestDiffid || latestDiffid === cursor) {
+      return { ...response, diffid: latestDiffid, entries };
+    }
+    cursor = latestDiffid;
+  }
 }
 
 function diffTouchesTask(entries, source, remoteState, known) {

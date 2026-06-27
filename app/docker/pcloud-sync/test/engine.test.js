@@ -369,6 +369,78 @@ test('SyncEngine uses pCloud diff cursor to validate cached scans without full r
   assert.equal(remoteState.lastScanMode, 'remote_diff');
 });
 
+test('SyncEngine reads pCloud diff pages until the cursor is caught up', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'a.txt');
+  await writeFile(filePath, 'hello');
+  const info = await stat(filePath);
+  const diffCalls = [];
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/a.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'a.txt',
+    remotePath: '/Sync/docs/a.txt',
+    size: 5,
+    mtimeMs: Math.trunc(info.mtimeMs),
+    mtime: Math.trunc(info.mtimeMs / 1000),
+    status: 'synced',
+    pcloudFileId: 109
+  });
+  await store.setTaskRemoteState('docs', {
+    remotePath: '/Sync/docs',
+    remoteFolderId: 42,
+    diffid: 100,
+    lastScanMode: 'remote_full'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      diff: async (params) => {
+        diffCalls.push(params);
+        if (diffCalls.length === 1) {
+          return {
+            diffid: 101,
+            entries: Array.from({ length: 1000 }, (_item, index) => ({
+              event: 'modifyfile',
+              metadata: { path: `/Other/file-${index}.txt`, fileid: 9000 + index }
+            }))
+          };
+        }
+        return { diffid: 102, entries: [] };
+      },
+      listRemoteFiles: async () => {
+        throw new Error('diff paging should avoid a full remote listing for unrelated changes');
+      },
+      ensureFolder: async () => {
+        throw new Error('unchanged files should not upload');
+      },
+      uploadFile: async () => {
+        throw new Error('unchanged files should not upload');
+      }
+    })
+  });
+
+  const result = await engine.scanNow();
+  const remoteState = await store.getTaskRemoteState('docs');
+
+  assert.deepEqual(diffCalls, [
+    { diffid: 100, limit: 1000 },
+    { diffid: 101, limit: 1000 }
+  ]);
+  assert.equal(result.taskResults[0].scanMode, 'remote_diff');
+  assert.equal(remoteState.diffid, 102);
+});
+
 test('SyncEngine falls back to a full remote comparison when pCloud diff touches the task folder', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
@@ -414,6 +486,51 @@ test('SyncEngine falls back to a full remote comparison when pCloud diff touches
 
   assert.equal(remoteScans, 1);
   assert.equal(result.taskResults[0].scanMode, 'remote_diff');
+});
+
+test('SyncEngine preserves previous file state when a remote scan fails', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'a.txt');
+  await writeFile(filePath, 'hello');
+  const info = await stat(filePath);
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/a.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'a.txt',
+    remotePath: '/Sync/docs/a.txt',
+    size: 5,
+    mtimeMs: Math.trunc(info.mtimeMs),
+    mtime: Math.trunc(info.mtimeMs / 1000),
+    status: 'existing',
+    pcloudFileId: 109
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      listRemoteTree: async () => {
+        throw new Error('temporary pCloud listing failure');
+      }
+    })
+  });
+
+  const result = await engine.scanNow({ forceRemoteScan: true });
+  const files = await store.listFiles();
+
+  assert.equal(result.failed, 1);
+  assert.equal(result.taskResults[0].status, 'failed');
+  assert.deepEqual(files.map((file) => [file.key, file.status, file.pcloudFileId]), [
+    ['docs/a.txt', 'existing', 109]
+  ]);
 });
 
 test('SyncEngine preserves cached existing files when a repeated scan skips remote listing', async () => {
@@ -1150,6 +1267,118 @@ test('SyncEngine falls back to the configured pCloud client when the selected up
   assert.equal(result.uploaded, 1);
   assert.deepEqual(calls, ['selected.uploadFile', 'base.uploadFile']);
   assert.ok(events.some((event) => event.type === 'server_fallback'));
+});
+
+test('SyncEngine verifies a transient upload error before retrying on a fallback server', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'verified.txt');
+  await writeFile(filePath, 'hello');
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    sync: { checksumMode: 'failed' },
+    tasks: [{ id: 'docs', name: 'docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/verified.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'verified.txt',
+    remotePath: '/Sync/docs/verified.txt',
+    size: 5,
+    status: 'pending'
+  });
+
+  const calls = [];
+  const selectedClient = {
+    ensureFolder: async () => ({ folderid: 42 }),
+    uploadFile: async () => {
+      calls.push('selected.uploadFile');
+      const error = new Error('socket hang up');
+      error.code = 'ECONNRESET';
+      throw error;
+    },
+    stat: async () => {
+      calls.push('selected.stat');
+      return { metadata: { fileid: 777, path: '/Sync/docs/verified.txt', size: 5, parentfolderid: 42 } };
+    },
+    checksumFile: async () => {
+      calls.push('selected.checksumFile');
+      return { sha1: 'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d' };
+    }
+  };
+  const baseClient = {
+    getApiServer: async () => ({ api: ['api7.pcloud.com'] }),
+    withHostname: () => selectedClient,
+    ensureFolder: async () => ({ folderid: 42 }),
+    uploadFile: async () => {
+      calls.push('base.uploadFile');
+      return { fileids: [778], metadata: [{ fileid: 778, name: 'verified.txt' }] };
+    }
+  };
+
+  const engine = new SyncEngine({ store, pcloudFactory: () => baseClient });
+  const result = await engine.processPending();
+  const files = await store.listFiles();
+
+  assert.equal(result.uploaded, 1);
+  assert.deepEqual(calls, ['selected.uploadFile', 'selected.stat', 'selected.checksumFile']);
+  assert.equal(files[0].status, 'synced');
+  assert.equal(files[0].pcloudFileId, 777);
+});
+
+test('SyncEngine delays upload when a queued local file changed after scanning', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'changing.txt');
+  await writeFile(filePath, 'hello');
+  const initialInfo = await stat(filePath);
+  await writeFile(filePath, 'hello again');
+  const changedInfo = await stat(filePath);
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/changing.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'changing.txt',
+    remotePath: '/Sync/docs/changing.txt',
+    size: 5,
+    mtimeMs: Math.trunc(initialInfo.mtimeMs),
+    mtime: Math.trunc(initialInfo.mtimeMs / 1000),
+    status: 'pending'
+  });
+
+  const calls = [];
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async () => ({ folderid: 42 }),
+      uploadFile: async () => {
+        calls.push('uploadFile');
+        return { fileids: [130], metadata: [{ fileid: 130, name: 'changing.txt' }] };
+      }
+    })
+  });
+
+  const result = await engine.processPending();
+  const files = await store.listFiles();
+  const events = await store.listEvents();
+
+  assert.equal(result.uploaded, 0);
+  assert.deepEqual(calls, []);
+  assert.equal(files[0].status, 'pending');
+  assert.equal(files[0].size, changedInfo.size);
+  assert.equal(files[0].mtimeMs, Math.trunc(changedInfo.mtimeMs));
+  assert.ok(events.some((event) => event.type === 'upload_delayed' && event.subject === 'docs/changing.txt'));
 });
 
 test('SyncEngine retry action also requeues stale uploading files', async () => {
