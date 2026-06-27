@@ -165,6 +165,11 @@
               <input name="mtimeVerifyConcurrency" type="number" min="1" max="10" step="1">
               <small class="field-note">用于“全部校验时间不同文件”；默认 3，文件很多时可提高，过高可能触发 pCloud 限流。</small>
             </label>
+            <label>
+              定时任务时区
+              <input name="timezone" autocomplete="off" placeholder="例如 Asia/Shanghai">
+              <small class="field-note">每天/每周定时任务按此时区触发；按间隔运行不受影响。</small>
+            </label>
             <div class="two">
               <label>
                 日志保存天数

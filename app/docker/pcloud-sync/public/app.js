@@ -24,6 +24,7 @@ const fields = {
   checksumMode: form.elements.checksumMode,
   checksumSamplePercent: form.elements.checksumSamplePercent,
   mtimeVerifyConcurrency: form.elements.mtimeVerifyConcurrency,
+  timezone: form.elements.timezone,
   logRetentionDays: form.elements.logRetentionDays,
   logRetentionCount: form.elements.logRetentionCount,
   ignorePatterns: form.elements.ignorePatterns
@@ -185,6 +186,7 @@ async function loadConfig() {
   fields.checksumMode.value = currentConfig.sync.checksumMode || 'failed';
   fields.checksumSamplePercent.value = currentConfig.sync.checksumSamplePercent ?? 5;
   fields.mtimeVerifyConcurrency.value = currentConfig.sync.mtimeVerifyConcurrency ?? 3;
+  fields.timezone.value = scheduleTimezoneValue(currentConfig.sync.timezone);
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
   fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
   fields.ignorePatterns.value = currentConfig.sync.ignorePatterns.join('\n');
@@ -214,6 +216,7 @@ async function saveConfig() {
       checksumMode: fields.checksumMode.value,
       checksumSamplePercent: Number(fields.checksumSamplePercent.value),
       mtimeVerifyConcurrency: Number(fields.mtimeVerifyConcurrency.value),
+      timezone: fields.timezone.value.trim(),
       logRetentionDays: Number(fields.logRetentionDays.value),
       logRetentionCount: Number(fields.logRetentionCount.value),
       ignorePatterns: fields.ignorePatterns.value
@@ -832,6 +835,18 @@ function show(message) {
 function joinRemote(...parts) {
   const joined = parts.join('/').replaceAll('\\', '/').split('/').filter(Boolean).join('/');
   return `/${joined}`;
+}
+
+function scheduleTimezoneValue(saved) {
+  const value = String(saved || '').trim();
+  if (value && value !== 'UTC') {
+    return value;
+  }
+  return browserTimezone();
+}
+
+function browserTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
 function escapeHtml(value) {

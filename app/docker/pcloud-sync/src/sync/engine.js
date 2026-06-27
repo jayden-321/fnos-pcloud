@@ -1430,7 +1430,7 @@ function taskIsDue(task, sync, now, slots) {
     const intervalMs = Number(schedule.intervalSeconds || sync.intervalSeconds || 300) * 1000;
     return !last?.at || now.getTime() - Number(last.at) >= intervalMs;
   }
-  const slot = scheduleSlot(schedule, now);
+  const slot = scheduleSlot(schedule, now, sync.timezone);
   return Boolean(slot) && slots.get(task.id)?.slot !== slot;
 }
 
@@ -1440,7 +1440,7 @@ function rememberTaskScheduleSlot(slots, task, sync, now) {
     return;
   }
   slots.set(task.id, {
-    slot: schedule.type === 'interval' ? `interval:${Math.floor(now.getTime() / 1000)}` : scheduleSlot(schedule, now),
+    slot: schedule.type === 'interval' ? `interval:${Math.floor(now.getTime() / 1000)}` : scheduleSlot(schedule, now, sync.timezone),
     at: now.getTime()
   });
 }
@@ -1459,31 +1459,51 @@ function effectiveSchedule(task, sync) {
   };
 }
 
-function scheduleSlot(schedule, now) {
+function scheduleSlot(schedule, now, timeZone) {
   const time = String(schedule.time || '').trim();
-  if (!timeMatches(time, now)) {
+  const parts = zonedScheduleParts(now, timeZone);
+  if (time !== `${parts.hour}:${parts.minute}`) {
     return '';
   }
   if (schedule.type === 'weekly') {
     const weekdays = Array.isArray(schedule.weekdays) ? schedule.weekdays : [];
-    if (!weekdays.includes(now.getDay())) {
+    if (!weekdays.includes(parts.weekday)) {
       return '';
     }
   }
-  return `${schedule.type}:${dateKey(now)}:${time}`;
+  return `${schedule.type}:${parts.date}:${time}:${parts.timeZone}`;
 }
 
-function timeMatches(time, now) {
-  const hour = String(now.getHours()).padStart(2, '0');
-  const minute = String(now.getMinutes()).padStart(2, '0');
-  return time === `${hour}:${minute}`;
-}
+const WEEKDAY_INDEX = new Map([
+  ['sun', 0],
+  ['mon', 1],
+  ['tue', 2],
+  ['wed', 3],
+  ['thu', 4],
+  ['fri', 5],
+  ['sat', 6]
+]);
 
-function dateKey(now) {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function zonedScheduleParts(now, timeZone) {
+  const resolvedTimeZone = String(timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC').trim();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: resolvedTimeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+    hourCycle: 'h23'
+  });
+  const values = new Map(formatter.formatToParts(now).map((part) => [part.type, part.value]));
+  return {
+    date: `${values.get('year')}-${values.get('month')}-${values.get('day')}`,
+    hour: values.get('hour'),
+    minute: values.get('minute'),
+    weekday: WEEKDAY_INDEX.get(String(values.get('weekday') || '').toLowerCase().slice(0, 3)),
+    timeZone: resolvedTimeZone
+  };
 }
 
 function remoteFolderForFile(_config, file) {

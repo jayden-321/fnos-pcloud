@@ -44,14 +44,17 @@ test('settings exposes official pCloud upload and checksum options', async () =>
   assert.match(html, /name="checksumMode"/);
   assert.match(html, /name="checksumSamplePercent"/);
   assert.match(html, /name="mtimeVerifyConcurrency"/);
+  assert.match(html, /name="timezone"/);
   assert.match(html, /失败后校验/);
   assert.match(html, /抽样校验/);
   assert.match(html, /全部校验/);
   assert.match(html, /时间不同校验并发数/);
+  assert.match(html, /定时任务时区/);
   assert.match(script, /renameIfExists/);
   assert.match(script, /checksumMode/);
   assert.match(script, /checksumSamplePercent/);
   assert.match(script, /mtimeVerifyConcurrency/);
+  assert.match(script, /scheduleTimezoneValue/);
 });
 
 test('settings exposes pCloud upload and download speed test controls', async () => {

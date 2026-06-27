@@ -11,7 +11,7 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, active uploads, and aggregate upload speed.
 - Task queue execution: each task scans and uploads before the next task starts.
-- Per-task scheduling: manual, interval, daily, and weekly schedules are supported.
+- Per-task scheduling: manual, interval, daily, and weekly schedules are supported, with a configurable scheduler timezone for daily and weekly tasks.
 - Scheduled runs drain a local filesystem watcher queue instead of rescanning every task directory.
 - Manual scans reconcile with pCloud on the first scan or when the task path changes, then use pCloud `diff` plus local SQLite state for repeated unchanged scans.
 - Task cards show the last scan source: full pCloud comparison, local cache, or pCloud diff.
@@ -127,15 +127,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.3.9 is one-way upload only, not two-way sync.
-- v0.3.9 does not propagate local deletions to pCloud.
-- v0.3.9 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.4.0 is one-way upload only, not two-way sync.
+- v0.4.0 does not propagate local deletions to pCloud.
+- v0.4.0 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.4.0: Adds timezone-aware daily and weekly task schedules, a Settings field for the scheduler timezone, Node.js 22.13 as the documented runtime baseline for `node:sqlite`, and a repository design-system reference generated from the Claude Design work.
 - v0.3.9: Adds pause support for long mtime-mismatch verification jobs. Running verification menus now expose Pause Verification, stop taking new checksum work after the current in-flight requests finish, preserve completed SQLite results, and allow the next run to continue remaining files.
 - v0.3.8: Adds a pCloud speed test tool that generates a temporary test file, uploads it, downloads it through `getfilelink`, verifies the downloaded checksum, reports upload and download throughput, and cleans up local and remote temporary files outside sync tasks.
 - v0.3.7: Adds a compact mtime verification action menu and detail dialog. Task cards now use a single dropdown for full verification, mismatched-file details, and failed-verification details, backed by a new API that lists affected files without uploading or overwriting anything.
@@ -145,7 +146,7 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 - v0.3.3: Tightens first-scan remote matching and adds scan diagnostics. Full pCloud comparisons now require matching modified times when pCloud provides reliable `mtime` metadata; same-path same-size fallback is only used when remote `mtime` is unavailable. Task cards and scan logs now show local scan count, remote file count, and local/remote/diff timings so unexpectedly fast remote comparisons are visible.
 - v0.3.2: Hardens scan and upload edge cases based on the official pCloud sync-library patterns. Remote scan failures now preserve the previous SQLite file state, pCloud `diff` reads continue across pages until the cursor is caught up, transient upload errors are verified with `stat` and `checksumfile` before fallback re-upload, queued files that changed after scanning are delayed instead of uploaded with stale metadata, and root Docker builds ignore SQLite runtime state.
 - v0.3.1: Adds pCloud API based scan transparency and upload hardening in one package. Task cards now retain the last scan source after refresh, scans can use pCloud `diff` cursors before trusting local cache, remote task state stores folder IDs, file IDs, and diff IDs, `uploadfile` can optionally pass `renameifexists`, selected upload server failures fall back to the configured API host, and optional `checksumfile` verification supports failed, sampled, or all uploads.
-- v0.3.0: Replaces JSON runtime state with a fresh SQLite state database. New installs use `/data/state.sqlite` for config, file records, and logs; legacy `state.json` is not imported, so deleting app data starts from a clean state. Requires Node.js 22.5 or newer for `node:sqlite`.
+- v0.3.0: Replaces JSON runtime state with a fresh SQLite state database. New installs use `/data/state.sqlite` for config, file records, and logs; legacy `state.json` is not imported, so deleting app data starts from a clean state. Requires Node.js 22.13 or newer for `node:sqlite`.
 - v0.2.12: Optimizes repeated cached scans for large folders. Cached scans now batch file-state replacement per task instead of rewriting `state.json` once per unchanged file, so large repeated scans avoid both recursive pCloud listing and thousands of full JSON writes.
 - v0.2.11: Refines sync task card states and repeated scan caching. New tasks now show Not Scanned instead of Completed, full reconciliation shows Scanning, upload/queue work shows Syncing, and Completed is only shown after the task has file state with no pending work. Repeated scans now reuse cached synced/existing file state when the task path has not changed, avoiding another recursive pCloud listing after a successful sync.
 - v0.2.10: Fixes task schedule field visibility in Settings. The UI now enforces the HTML `hidden` attribute in CSS so interval, daily, weekly, and manual schedules actually hide fields that do not apply. Manual scans with no enabled tasks now show a no-task message instead of saying the scan was triggered.

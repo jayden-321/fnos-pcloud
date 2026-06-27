@@ -16,7 +16,8 @@ const DEFAULT_CONFIG = {
     renameIfExists: false,
     checksumMode: 'failed',
     checksumSamplePercent: 5,
-    mtimeVerifyConcurrency: 3
+    mtimeVerifyConcurrency: 3,
+    timezone: systemTimezone()
   },
   tasks: [],
   sources: []
@@ -85,8 +86,26 @@ function normalizeSync(input) {
     checksumMode: normalizeChecksumMode(input.checksumMode),
     checksumSamplePercent: clampInteger(input.checksumSamplePercent, DEFAULT_CONFIG.sync.checksumSamplePercent, 0, 100),
     mtimeVerifyConcurrency: clampInteger(input.mtimeVerifyConcurrency, DEFAULT_CONFIG.sync.mtimeVerifyConcurrency, 1, 10),
+    timezone: normalizeTimezone(input.timezone),
     ignorePatterns: normalizeIgnorePatterns(input.ignorePatterns ?? DEFAULT_CONFIG.sync.ignorePatterns)
   };
+}
+
+function normalizeTimezone(value) {
+  const timezone = String(value || '').trim();
+  if (!timezone) {
+    return DEFAULT_CONFIG.sync.timezone;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+    return timezone;
+  } catch {
+    return DEFAULT_CONFIG.sync.timezone;
+  }
+}
+
+function systemTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
 function normalizeChecksumMode(value) {

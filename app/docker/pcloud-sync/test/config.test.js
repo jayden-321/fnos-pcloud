@@ -8,6 +8,7 @@ test('normalizeConfig supplies safe defaults for first run', () => {
   assert.equal(config.port, 8080);
   assert.equal(config.sync.intervalSeconds, 300);
   assert.equal(config.sync.concurrency, 2);
+  assert.equal(config.sync.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   assert.equal(config.sync.logRetentionDays, 30);
   assert.equal(config.sync.logRetentionCount, 300);
   assert.equal(config.pcloud.hostname, 'api.pcloud.com');
@@ -55,6 +56,7 @@ test('normalizeConfig cleans remote root and source definitions', () => {
   ]);
   assert.equal(config.sync.intervalSeconds, 30);
   assert.equal(config.sync.concurrency, 8);
+  assert.equal(config.sync.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   assert.equal(config.sync.logRetentionDays, 0);
   assert.equal(config.sync.logRetentionCount, 10000);
   assert.deepEqual(config.sync.ignorePatterns, ['*.tmp', '.DS_Store']);
@@ -88,6 +90,14 @@ test('normalizeConfig keeps official upload conflict and checksum options', () =
   assert.equal(fallback.sync.checksumMode, 'failed');
   assert.equal(fallback.sync.checksumSamplePercent, 100);
   assert.equal(fallback.sync.mtimeVerifyConcurrency, 10);
+});
+
+test('normalizeConfig validates scheduler timezones', () => {
+  const config = normalizeConfig({ sync: { timezone: 'Asia/Shanghai' } });
+  const fallback = normalizeConfig({ sync: { timezone: 'Not/A_Zone' } });
+
+  assert.equal(config.sync.timezone, 'Asia/Shanghai');
+  assert.equal(fallback.sync.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
 });
 
 test('normalizeConfig preserves non-ASCII source names for remote folders', () => {

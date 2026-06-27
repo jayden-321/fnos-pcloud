@@ -828,6 +828,48 @@ test('SyncEngine scheduled runner drains due task queues without a full scan', a
   assert.equal(await engine.runDueTasks(new Date(2026, 5, 29, 9, 30, 40)), 0);
 });
 
+test('SyncEngine scheduled runner uses the configured timezone for daily and weekly schedules', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'queued.txt');
+  await writeFile(filePath, 'queued');
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    sync: { timezone: 'Asia/Shanghai' },
+    tasks: [
+      { id: 'daily', name: 'Daily', localPath: sourceDir, remotePath: '/Sync/daily', schedule: { type: 'daily', time: '09:30' } },
+      { id: 'weekly', name: 'Weekly', localPath: sourceDir, remotePath: '/Sync/weekly', schedule: { type: 'weekly', time: '09:30', weekdays: [6] } }
+    ]
+  }));
+  await store.upsertFile({
+    key: 'daily/queued.txt',
+    sourceId: 'daily',
+    absolutePath: filePath,
+    relativePath: 'queued.txt',
+    remotePath: '/Sync/daily/queued.txt',
+    size: 6,
+    status: 'pending'
+  });
+
+  const uploads = [];
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async () => ({ folderid: 42 }),
+      uploadFile: async (payload) => {
+        uploads.push(payload.filename);
+        return { fileids: [42], metadata: [{ fileid: 42, name: payload.filename }] };
+      }
+    })
+  });
+
+  assert.equal(await engine.runDueTasks(new Date('2026-06-27T01:30:10.000Z')), 2);
+  assert.deepEqual(uploads, ['queued.txt']);
+  assert.equal(await engine.runDueTasks(new Date('2026-06-27T09:30:10.000Z')), 0);
+});
+
 test('SyncEngine turns queued local file changes into pending scheduled uploads', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
