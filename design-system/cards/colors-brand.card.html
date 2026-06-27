@@ -1,0 +1,24 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Brand & accent" subtitle="Green icon mark, blue interactive accent" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; font-family: var(--font-ui); color: var(--text); background: var(--panel); }
+  .row { display: flex; gap: 14px; padding: 20px; flex-wrap: wrap; }
+  .sw { width: 150px; }
+  .chip { height: 60px; border-radius: var(--radius-md); border: 1px solid var(--line); }
+  .name { font-size: 12px; font-weight: 700; margin-top: 8px; }
+  .hex { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:var(--brand-green)"></div><div class="name">Brand green</div><div class="hex">#1d6f5f</div></div>
+    <div class="sw"><div class="chip" style="background:var(--brand-yellow)"></div><div class="name">Brand yellow</div><div class="hex">#f2c14e</div></div>
+    <div class="sw"><div class="chip" style="background:var(--accent)"></div><div class="name">Accent</div><div class="hex">#2775df</div></div>
+    <div class="sw"><div class="chip" style="background:var(--accent-strong)"></div><div class="name">Accent strong</div><div class="hex">#1c5db3</div></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,46 @@
+/* pCloud NAS Sync — Color tokens
+   Sourced verbatim from the product stylesheet (public/styles.css) plus the
+   brand mark colors sampled from the app icon. */
+
+:root {
+  /* ---- Brand (app icon) ---- */
+  --brand-green: #1d6f5f;        /* icon tile background */
+  --brand-green-deep: #155446;   /* darker shade for depth */
+  --brand-yellow: #f2c14e;       /* sync arrow */
+  --brand-on-green: #ffffff;     /* "pC" wordmark on the tile */
+
+  /* ---- Surfaces ---- */
+  --bg: #f6f8fb;                 /* app canvas */
+  --sidebar: #edf2f7;            /* left navigation rail */
+  --panel: #ffffff;              /* cards, panels, dialogs */
+  --panel-subtle: #fbfcfd;       /* zebra rows, editor wells, table heads */
+  --field: #f8fafc;              /* folder-path readout */
+
+  /* ---- Text ---- */
+  --text: #17202a;              /* primary text */
+  --text-soft: #2f3d4c;         /* labels */
+  --muted: #728199;             /* secondary / captions */
+  --muted-2: #7890ad;           /* table secondary cells */
+
+  /* ---- Lines ---- */
+  --line: #d9e1ea;              /* borders, dividers */
+
+  /* ---- Accent (interactive blue) ---- */
+  --accent: #2775df;            /* primary action / active nav */
+  --accent-strong: #1c5db3;     /* primary hover/pressed */
+  --accent-ink: #2c5f9e;        /* text on soft-blue buttons */
+  --accent-soft: #eef4fb;       /* soft button fill */
+  --accent-soft-hover: #ddeafa; /* soft button hover */
+  --nav-hover: #dde8f6;         /* sidebar item hover */
+  --create-ink: #1f5fbf;        /* "create task" link button */
+
+  /* ---- Status ---- */
+  --green: #2f9a4b;             /* success */
+  --danger: #b7322c;            /* failed / error */
+  --queued: #718096;            /* queued / pending neutral */
+  --warn: #b8860b;              /* mtime mismatch advisory */
+
+  /* ---- Overlay ---- */
+  --scrim: rgb(15 23 42 / 0.34); /* dialog backdrop */
+  --toast-bg: #1f2933;           /* toast surface */
+}

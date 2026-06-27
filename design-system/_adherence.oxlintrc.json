@@ -1,0 +1,259 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/core/**",
+              "components/navigation/**",
+              "components/tasks/**",
+              "ui_kits/pcloud-sync/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute > JSXIdentifier[name!=/^(?:variant|fullWidth|children|key|ref|className|style|children)$/]",
+        "message": "<Button> doesn't accept that prop. Declared props: variant, fullWidth, children."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:primary|soft|ghost|link)$/]",
+        "message": "<Button> variant must be one of 'primary' | 'soft' | 'ghost' | 'link'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Field'] > JSXAttribute > JSXIdentifier[name!=/^(?:label|note|inline|children|style|key|ref|className|style|children)$/]",
+        "message": "<Field> doesn't accept that prop. Declared props: label, note, inline, children, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='MetricCard'] > JSXAttribute > JSXIdentifier[name!=/^(?:value|label|tone|style|key|ref|className|style|children)$/]",
+        "message": "<MetricCard> doesn't accept that prop. Declared props: value, label, tone, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='MetricCard'] > JSXAttribute[name.name='tone'] > Literal[value!=/^(?:default|success|danger|accent|muted)$/]",
+        "message": "<MetricCard> tone must be one of 'default' | 'success' | 'danger' | 'accent' | 'muted'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='NavItem'] > JSXAttribute > JSXIdentifier[name!=/^(?:active|children|key|ref|className|style|children)$/]",
+        "message": "<NavItem> doesn't accept that prop. Declared props: active, children."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Panel'] > JSXAttribute > JSXIdentifier[name!=/^(?:title|action|padding|children|key|ref|className|style|children)$/]",
+        "message": "<Panel> doesn't accept that prop. Declared props: title, action, padding, children."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusPill'] > JSXAttribute > JSXIdentifier[name!=/^(?:status|children|style|key|ref|className|style|children)$/]",
+        "message": "<StatusPill> doesn't accept that prop. Declared props: status, children, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='StatusPill'] > JSXAttribute[name.name='status'] > Literal[value!=/^(?:success|failed|uploading|queued|existing)$/]",
+        "message": "<StatusPill> status must be one of 'success' | 'failed' | 'uploading' | 'queued' | 'existing'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='TaskStats'] > JSXAttribute > JSXIdentifier[name!=/^(?:total|existing|synced|pending|failed|key|ref|className|style|children)$/]",
+        "message": "<TaskStats> doesn't accept that prop. Declared props: total, existing, synced, pending, failed."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "Button": {
+        "replaces": []
+      },
+      "Field": {
+        "replaces": []
+      },
+      "MetricCard": {
+        "replaces": []
+      },
+      "NavItem": {
+        "replaces": []
+      },
+      "Panel": {
+        "replaces": []
+      },
+      "StatusPill": {
+        "replaces": []
+      },
+      "TaskStats": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--accent",
+      "--accent-ink",
+      "--accent-soft",
+      "--accent-soft-hover",
+      "--accent-strong",
+      "--bg",
+      "--border",
+      "--border-width",
+      "--brand-green",
+      "--brand-green-deep",
+      "--brand-on-green",
+      "--brand-yellow",
+      "--btn-pad-x",
+      "--control-h",
+      "--create-ink",
+      "--danger",
+      "--field",
+      "--font-mono",
+      "--font-ui",
+      "--fs-body",
+      "--fs-caption",
+      "--fs-card-title",
+      "--fs-h2",
+      "--fs-metric",
+      "--fs-nav",
+      "--fs-small",
+      "--fw-bold",
+      "--fw-label",
+      "--fw-medium",
+      "--fw-metric",
+      "--fw-normal",
+      "--green",
+      "--input-pad-x",
+      "--input-pad-y",
+      "--lh-base",
+      "--lh-tight",
+      "--line",
+      "--muted",
+      "--muted-2",
+      "--nav-h",
+      "--nav-hover",
+      "--panel",
+      "--panel-subtle",
+      "--queued",
+      "--radius-md",
+      "--radius-sm",
+      "--radius-tile",
+      "--scrim",
+      "--shadow-dialog",
+      "--shadow-none",
+      "--shadow-toast",
+      "--sidebar",
+      "--sidebar-w",
+      "--space-1",
+      "--space-10",
+      "--space-11",
+      "--space-2",
+      "--space-3",
+      "--space-4",
+      "--space-5",
+      "--space-6",
+      "--space-7",
+      "--space-8",
+      "--space-9",
+      "--text",
+      "--text-soft",
+      "--toast-bg",
+      "--warn",
+      "--workspace-pad"
+    ],
+    "tokenKinds": {
+      "--brand-green": "color",
+      "--brand-green-deep": "color",
+      "--brand-yellow": "color",
+      "--brand-on-green": "color",
+      "--bg": "color",
+      "--sidebar": "color",
+      "--panel": "color",
+      "--panel-subtle": "color",
+      "--field": "color",
+      "--text": "font",
+      "--text-soft": "font",
+      "--muted": "color",
+      "--muted-2": "color",
+      "--line": "color",
+      "--accent": "color",
+      "--accent-strong": "color",
+      "--accent-ink": "color",
+      "--accent-soft": "color",
+      "--accent-soft-hover": "color",
+      "--nav-hover": "color",
+      "--create-ink": "color",
+      "--green": "color",
+      "--danger": "color",
+      "--queued": "color",
+      "--warn": "color",
+      "--scrim": "color",
+      "--toast-bg": "color",
+      "--font-ui": "font",
+      "--font-mono": "font",
+      "--fs-caption": "spacing",
+      "--fs-small": "spacing",
+      "--fs-body": "spacing",
+      "--fs-nav": "spacing",
+      "--fs-card-title": "spacing",
+      "--fs-h2": "spacing",
+      "--fs-metric": "spacing",
+      "--lh-base": "other",
+      "--lh-tight": "other",
+      "--fw-normal": "other",
+      "--fw-medium": "other",
+      "--fw-label": "other",
+      "--fw-bold": "other",
+      "--fw-metric": "other",
+      "--space-1": "spacing",
+      "--space-2": "spacing",
+      "--space-3": "spacing",
+      "--space-4": "spacing",
+      "--space-5": "spacing",
+      "--space-6": "spacing",
+      "--space-7": "spacing",
+      "--space-8": "spacing",
+      "--space-9": "spacing",
+      "--space-10": "spacing",
+      "--space-11": "spacing",
+      "--radius-sm": "radius",
+      "--radius-md": "radius",
+      "--radius-tile": "radius",
+      "--border": "color",
+      "--border-width": "spacing",
+      "--control-h": "spacing",
+      "--nav-h": "spacing",
+      "--input-pad-y": "spacing",
+      "--input-pad-x": "spacing",
+      "--btn-pad-x": "spacing",
+      "--sidebar-w": "spacing",
+      "--workspace-pad": "spacing",
+      "--shadow-none": "shadow",
+      "--shadow-toast": "shadow",
+      "--shadow-dialog": "shadow"
+    },
+    "fontFamilies": []
+  }
+}
