@@ -127,15 +127,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.3.7 is one-way upload only, not two-way sync.
-- v0.3.7 does not propagate local deletions to pCloud.
-- v0.3.7 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.3.8 is one-way upload only, not two-way sync.
+- v0.3.8 does not propagate local deletions to pCloud.
+- v0.3.8 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.3.8: Adds a pCloud speed test tool that generates a temporary test file, uploads it, downloads it through `getfilelink`, verifies the downloaded checksum, reports upload and download throughput, and cleans up local and remote temporary files outside sync tasks.
 - v0.3.7: Adds a compact mtime verification action menu and detail dialog. Task cards now use a single dropdown for full verification, mismatched-file details, and failed-verification details, backed by a new API that lists affected files without uploading or overwriting anything.
 - v0.3.6: Replaces the mtime-mismatch sample check with an on-demand full verification job. The task card can now start a background checksum pass for all unverified mtime-mismatched files, uses a configurable verification concurrency, writes each result to SQLite as it finishes, and displays verified, mismatched, and failed counts without uploading or overwriting files.
 - v0.3.5: Adds mtime-mismatch sample verification. Task cards now show an on-demand sample check for files that were adopted by path and size but have different mtimes; the check calls pCloud `checksumfile` and compares local SHA-1 without re-uploading files, reporting matched, mismatched, and failed counts.

@@ -192,6 +192,16 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     }));
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/speed-test') {
+    const body = await readJsonBody(request);
+    if (!engine.startSpeedTest) {
+      return json({ error: 'pCloud speed test is unavailable' }, 501);
+    }
+    return json(await engine.startSpeedTest({
+      sizeMb: Number(body.sizeMb || 50)
+    }));
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/stop') {
     if (!engine.requestStop) {
       return json({ stopping: false, activeUploads: 0 });

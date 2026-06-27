@@ -1,8 +1,10 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const OFFICIAL_HOSTS = new Set(['api.pcloud.com', 'eapi.pcloud.com']);
 const TRANSIENT_RETRY_DELAYS_MS = [250, 1000];
@@ -141,8 +143,36 @@ export class PCloudClient {
     return this.requestJson('stat', { fileid, path: filePath });
   }
 
+  async getFileLink({ fileid = null, path: filePath = '' } = {}) {
+    return this.requestJson('getfilelink', { fileid, path: filePath });
+  }
+
+  async deleteFile({ fileid = null, path: filePath = '' } = {}) {
+    return this.requestJson('deletefile', { fileid, path: filePath });
+  }
+
   async diff(params = {}) {
     return this.requestJson('diff', params);
+  }
+
+  async downloadFile({ fileid = null, path: remotePath = '', filePath, onProgress = null } = {}) {
+    if (!filePath) {
+      throw new Error('Download target path is required');
+    }
+    const link = await this.getFileLink({ fileid, path: remotePath });
+    const url = downloadUrl(link, this.urlFor('/'));
+    const response = await fetch(url);
+    if (!response.ok || !response.body) {
+      throw new Error(`pCloud download failed: ${response.status}`);
+    }
+    let downloaded = 0;
+    const readable = Readable.fromWeb(response.body);
+    readable.on('data', (chunk) => {
+      downloaded += chunk.length;
+      onProgress?.(downloaded, Number(response.headers.get('content-length') || 0));
+    });
+    await pipeline(readable, createWriteStream(filePath));
+    return { bytes: downloaded };
   }
 
   async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, renameIfExists = false, onProgress, signal }) {
@@ -421,6 +451,20 @@ function uploadStoppedError() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function downloadUrl(link, baseUrl) {
+  const host = Array.isArray(link?.hosts) ? link.hosts[0] : link?.host;
+  const filePath = String(link?.path || '');
+  if (!host || !filePath) {
+    throw new Error('pCloud getfilelink did not return a downloadable URL');
+  }
+  const hostText = String(host);
+  if (/^https?:\/\//i.test(hostText)) {
+    return new URL(filePath, hostText);
+  }
+  const protocol = baseUrl.protocol === 'http:' ? 'http:' : 'https:';
+  return new URL(`${protocol}//${hostText}${filePath}`);
 }
 
 function escapeHeader(value) {

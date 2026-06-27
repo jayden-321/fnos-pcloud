@@ -54,6 +54,21 @@ test('settings exposes official pCloud upload and checksum options', async () =>
   assert.match(script, /mtimeVerifyConcurrency/);
 });
 
+test('settings exposes pCloud upload and download speed test controls', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="speedTestSize"/);
+  assert.match(html, /id="startSpeedTest"/);
+  assert.match(html, /上传速度/);
+  assert.match(html, /下载速度/);
+  assert.match(script, /startSpeedTest/);
+  assert.match(script, /renderSpeedTest/);
+  assert.match(script, /\/api\/speed-test/);
+});
+
 test('sync logs expose file size, progress, and uploading status filters', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const script = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');

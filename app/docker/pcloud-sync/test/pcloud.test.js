@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PCloudClient, validatePCloudHostname } from '../src/pcloud/client.js';
@@ -349,6 +349,47 @@ test('PCloudClient wraps progress, checksum, diff, and server selection APIs', a
     assert.ok(calls.some((call) => call.includes('/diff') && call.includes('diffid=41')));
   } finally {
     await server.close();
+  }
+});
+
+test('PCloudClient downloads files through getfilelink and deletes remote files', async () => {
+  const calls = [];
+  let downloadHost = '';
+  const server = await withServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    calls.push(url.pathname + url.search);
+    res.setHeader('content-type', 'application/json');
+    if (url.pathname === '/getfilelink') {
+      res.end(JSON.stringify({ result: 0, hosts: [downloadHost], path: '/download/speed.bin' }));
+      return;
+    }
+    if (url.pathname === '/deletefile') {
+      res.end(JSON.stringify({ result: 0 }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ result: 404, error: 'not found' }));
+  });
+  const downloadServer = await withServer((req, res) => {
+    assert.equal(req.url, '/download/speed.bin');
+    res.end('downloaded');
+  });
+  downloadHost = downloadServer.baseUrl;
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-download-'));
+  const targetPath = path.join(dir, 'speed.bin');
+
+  try {
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token' });
+    const result = await client.downloadFile({ fileid: 77, filePath: targetPath });
+    await client.deleteFile({ fileid: 77 });
+
+    assert.equal(result.bytes, 10);
+    assert.equal(await readFile(targetPath, 'utf8'), 'downloaded');
+    assert.ok(calls.some((call) => call.includes('/getfilelink') && call.includes('fileid=77')));
+    assert.ok(calls.some((call) => call.includes('/deletefile') && call.includes('fileid=77')));
+  } finally {
+    await server.close();
+    await downloadServer.close();
   }
 });
 

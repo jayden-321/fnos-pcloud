@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeConfig } from '../src/config/config.js';
@@ -116,6 +117,52 @@ test('SyncEngine passes renameifexists and verifies successful uploads when chec
   ]);
   assert.equal(files[0].checksumSha1, 'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d');
   assert.ok(files[0].checksumVerifiedAt);
+});
+
+test('SyncEngine runs a pCloud upload and download speed test without syncing files', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const calls = [];
+  let uploadedSha1 = '';
+  let uploadedContent = null;
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' }
+  }));
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async (remotePath) => {
+        calls.push(['ensureFolder', remotePath]);
+        return { folderid: 44 };
+      },
+      uploadFile: async ({ filePath, folderid, filename }) => {
+        calls.push(['uploadFile', folderid, filename]);
+        uploadedContent = await readFile(filePath);
+        uploadedSha1 = sha1ForTest(uploadedContent);
+        return { fileids: [808], metadata: [{ fileid: 808, path: `/pcloud-nas-sync-speed-test/${filename}` }] };
+      },
+      downloadFile: async ({ fileid, filePath }) => {
+        calls.push(['downloadFile', fileid]);
+        await writeFile(filePath, uploadedContent);
+        return { bytes: 1024 * 1024 };
+      },
+      deleteFile: async ({ fileid }) => {
+        calls.push(['deleteFile', fileid]);
+        return { result: 0 };
+      }
+    })
+  });
+
+  const result = await engine.runSpeedTest({ sizeMb: 1 });
+
+  assert.equal(result.sizeBytes, 1024 * 1024);
+  assert.equal(result.upload.bytesPerSecond > 0, true);
+  assert.equal(result.download.bytesPerSecond > 0, true);
+  assert.equal(result.checksumMatched, true);
+  assert.deepEqual(calls.map((call) => call[0]), ['ensureFolder', 'uploadFile', 'downloadFile', 'deleteFile']);
 });
 
 test('SyncEngine can verify an apparent upload failure by checksum and mark the file synced', async () => {
@@ -1816,4 +1863,8 @@ async function waitFor(predicate, timeoutMs = 1000) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(predicate(), true);
+}
+
+function sha1ForTest(value) {
+  return createHash('sha1').update(value).digest('hex');
 }

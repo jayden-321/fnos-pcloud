@@ -1,6 +1,7 @@
-import { createReadStream, watch } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream, watch } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeConfig } from '../config/config.js';
 import { PCloudClient } from '../pcloud/client.js';
@@ -9,6 +10,7 @@ import { planUploads } from './planner.js';
 
 const MIN_UPLOAD_SPEED_SAMPLE_MS = 500;
 const PCLOUD_DIFF_LIMIT = 1000;
+const SPEED_TEST_REMOTE_PATH = '/pcloud-nas-sync-speed-test';
 
 export class SyncEngine {
   constructor({ store, pcloudFactory } = {}) {
@@ -28,6 +30,7 @@ export class SyncEngine {
     this.changedFiles = new Map();
     this.changedTasks = new Set();
     this.mtimeVerificationJobs = new Map();
+    this.speedTestJob = null;
   }
 
   getStatus() {
@@ -54,7 +57,8 @@ export class SyncEngine {
         total: upload.total,
         updatedAt: upload.updatedAt
       })),
-      mtimeVerifications: [...this.mtimeVerificationJobs.values()].map((job) => structuredClone(job))
+      mtimeVerifications: [...this.mtimeVerificationJobs.values()].map((job) => structuredClone(job)),
+      speedTest: this.speedTestJob ? structuredClone(this.speedTestJob) : null
     };
   }
 
@@ -848,6 +852,124 @@ export class SyncEngine {
     };
   }
 
+  async startSpeedTest({ sizeMb = 50 } = {}) {
+    if (this.speedTestJob?.running) {
+      return structuredClone(this.speedTestJob);
+    }
+    const job = {
+      running: true,
+      phase: 'starting',
+      sizeMb: clampSpeedTestSize(sizeMb),
+      sizeBytes: clampSpeedTestSize(sizeMb) * 1024 * 1024,
+      upload: null,
+      download: null,
+      checksumMatched: false,
+      cleanup: null,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: ''
+    };
+    this.speedTestJob = job;
+    this.runSpeedTest({
+      sizeMb: job.sizeMb,
+      onProgress: (progress) => {
+        Object.assign(job, progress, {
+          running: true,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }).then((summary) => {
+      Object.assign(job, summary, {
+        running: false,
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        error: ''
+      });
+    }).catch((error) => {
+      Object.assign(job, {
+        running: false,
+        phase: 'failed',
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        error: error.message
+      });
+      this.lastError = error.message;
+    });
+    return structuredClone(job);
+  }
+
+  async runSpeedTest({ sizeMb = 50, onProgress = null } = {}) {
+    const config = normalizeConfig(await this.store.loadConfig() ?? {});
+    if (!config.pcloud.accessToken) {
+      throw new Error('pCloud access token is not configured');
+    }
+    const client = this.pcloudFactory(config);
+    const size = clampSpeedTestSize(sizeMb);
+    const sizeBytes = size * 1024 * 1024;
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'pcloud-speed-test-'));
+    const filename = `speed-test-${Date.now()}-${Math.random().toString(16).slice(2)}.bin`;
+    const uploadPath = path.join(tempDir, filename);
+    const downloadPath = path.join(tempDir, `download-${filename}`);
+    let fileid = null;
+    const cleanup = { localRemoved: false, remoteRemoved: false, remoteError: '' };
+
+    try {
+      onProgress?.({ phase: 'generating', sizeMb: size, sizeBytes });
+      await writeRandomFile(uploadPath, sizeBytes);
+      const localSha1 = await sha1File(uploadPath);
+
+      onProgress?.({ phase: 'uploading', sizeMb: size, sizeBytes });
+      const folder = await client.ensureFolder(SPEED_TEST_REMOTE_PATH);
+      const uploadStartedAt = Date.now();
+      const uploadResponse = await client.uploadFile({
+        filePath: uploadPath,
+        filename,
+        folderid: folder.folderid
+      });
+      const uploadMs = Math.max(1, Date.now() - uploadStartedAt);
+      fileid = uploadMetadata(uploadResponse)?.fileid ?? uploadResponse?.fileids?.[0] ?? null;
+
+      onProgress?.({ phase: 'downloading', sizeMb: size, sizeBytes });
+      const downloadStartedAt = Date.now();
+      const download = await client.downloadFile({ fileid, filePath: downloadPath });
+      const downloadMs = Math.max(1, Date.now() - downloadStartedAt);
+      const downloadSha1 = await sha1File(downloadPath);
+
+      const summary = {
+        running: false,
+        phase: 'completed',
+        sizeMb: size,
+        sizeBytes,
+        remotePath: `${SPEED_TEST_REMOTE_PATH}/${filename}`,
+        upload: speedMetric(sizeBytes, uploadMs),
+        download: speedMetric(download.bytes || sizeBytes, downloadMs),
+        checksumMatched: localSha1 === downloadSha1,
+        cleanup
+      };
+
+      if (fileid && client.deleteFile) {
+        try {
+          await client.deleteFile({ fileid });
+          cleanup.remoteRemoved = true;
+        } catch (error) {
+          cleanup.remoteError = error.message;
+        }
+      }
+      return summary;
+    } finally {
+      if (fileid && client.deleteFile && !cleanup.remoteRemoved) {
+        await client.deleteFile({ fileid }).then(() => {
+          cleanup.remoteRemoved = true;
+        }).catch((error) => {
+          cleanup.remoteError = error.message;
+        });
+      }
+      await rm(tempDir, { recursive: true, force: true }).then(() => {
+        cleanup.localRemoved = true;
+      }).catch(() => {});
+    }
+  }
+
   async verifyMtimeMismatchSample({ taskId = '', limit = 20 } = {}) {
     return this.verifyMtimeMismatches({ taskId, limit, concurrency: 1 });
   }
@@ -1381,6 +1503,43 @@ function shouldVerifySuccessfulUpload(file, sync) {
 function stablePercent(value) {
   const hash = createHash('sha1').update(String(value || '')).digest();
   return hash[0] % 100;
+}
+
+function clampSpeedTestSize(value) {
+  return Math.max(1, Math.min(1024, Math.trunc(Number(value || 50))));
+}
+
+async function writeRandomFile(filePath, sizeBytes) {
+  await new Promise((resolve, reject) => {
+    const stream = createWriteStream(filePath);
+    let remaining = Number(sizeBytes || 0);
+    stream.on('error', reject);
+    stream.on('finish', resolve);
+
+    function writeMore() {
+      while (remaining > 0) {
+        const chunkSize = Math.min(1024 * 1024, remaining);
+        remaining -= chunkSize;
+        if (!stream.write(randomBytes(chunkSize))) {
+          stream.once('drain', writeMore);
+          return;
+        }
+      }
+      stream.end();
+    }
+
+    writeMore();
+  });
+}
+
+function speedMetric(bytes, durationMs) {
+  const elapsedMs = Math.max(1, Number(durationMs || 0));
+  const byteCount = Number(bytes || 0);
+  return {
+    bytes: byteCount,
+    durationMs: elapsedMs,
+    bytesPerSecond: Math.round(byteCount / (elapsedMs / 1000))
+  };
 }
 
 function pushLimited(items, item, limit = 100) {

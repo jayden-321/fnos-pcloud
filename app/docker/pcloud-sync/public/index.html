@@ -186,6 +186,28 @@
             </label>
           </section>
 
+          <section class="panel">
+            <h3>pCloud 速度测试</h3>
+            <div class="speed-test-controls">
+              <label>
+                测试大小
+                <select id="speedTestSize">
+                  <option value="10">10 MB</option>
+                  <option value="50" selected>50 MB</option>
+                  <option value="100">100 MB</option>
+                </select>
+              </label>
+              <button id="startSpeedTest" type="button">开始测速</button>
+            </div>
+            <div id="speedTestResult" class="speed-test-result">
+              <span>状态：未测试</span>
+              <span>上传速度：--</span>
+              <span>下载速度：--</span>
+              <span>校验：--</span>
+            </div>
+            <small class="field-note">测速会在 pCloud 的 /pcloud-nas-sync-speed-test 目录创建临时文件，测试结束后自动清理；不会进入同步任务。</small>
+          </section>
+
           <button class="save-settings" type="submit">保存设置</button>
         </form>
       </section>

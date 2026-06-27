@@ -81,6 +81,13 @@ document.querySelector('#retryFailed').addEventListener('click', async () => {
   show(`${result.queued} 个已入队，${result.uploaded || 0} 个已上传，${result.failed || 0} 个失败`);
 });
 
+document.querySelector('#startSpeedTest').addEventListener('click', async () => {
+  const sizeMb = Number(document.querySelector('#speedTestSize').value || 50);
+  const result = await post('/api/speed-test', { sizeMb });
+  await refreshStatus();
+  show(result.running ? '测速已开始' : '测速完成');
+});
+
 document.querySelector('#clearEvents').addEventListener('click', async () => {
   const result = await del('/api/events');
   currentEvents = [];
@@ -230,6 +237,7 @@ async function refreshStatus() {
   setText('statUploading', displayedStats.uploading);
   setText('statSpeed', formatBytesPerSecond(currentStatus.engine?.uploadSpeedBytesPerSecond || 0));
   document.querySelector('#stopSync').disabled = !currentStatus.engine?.active && !currentStatus.stats.uploading;
+  renderSpeedTest(currentStatus.engine?.speedTest);
   currentEvents = currentStatus.events || [];
 
   const rows = [...currentStatus.failed, ...currentStatus.pending, ...(currentStatus.uploading || [])].slice(0, 200);
@@ -714,6 +722,47 @@ function renderEvents() {
       <td>${escapeHtml(row.progressText)}</td>
     </tr>
   `).join('') || '<tr><td colspan="6" class="empty">暂无文件同步日志</td></tr>';
+}
+
+function renderSpeedTest(speedTest) {
+  const button = document.querySelector('#startSpeedTest');
+  const result = document.querySelector('#speedTestResult');
+  if (!result) {
+    return;
+  }
+  button.disabled = speedTest?.running === true;
+  if (!speedTest) {
+    result.innerHTML = `
+      <span>状态：未测试</span>
+      <span>上传速度：--</span>
+      <span>下载速度：--</span>
+      <span>校验：--</span>
+    `;
+    return;
+  }
+  result.innerHTML = `
+    <span>状态：${escapeHtml(speedTestPhaseText(speedTest.phase, speedTest.running))}</span>
+    <span>大小：${escapeHtml(formatBytes(speedTest.sizeBytes || 0))}</span>
+    <span>上传速度：${escapeHtml(speedTest.upload ? formatBytesPerSecond(speedTest.upload.bytesPerSecond) : '--')}</span>
+    <span>下载速度：${escapeHtml(speedTest.download ? formatBytesPerSecond(speedTest.download.bytesPerSecond) : '--')}</span>
+    <span>校验：${speedTest.checksumMatched ? '通过' : speedTest.phase === 'completed' ? '失败' : '--'}</span>
+    ${speedTest.error ? `<span class="danger">错误：${escapeHtml(speedTest.error)}</span>` : ''}
+  `;
+}
+
+function speedTestPhaseText(phase, running) {
+  if (running) {
+    return {
+      starting: '准备中',
+      generating: '生成测试文件',
+      uploading: '上传测速',
+      downloading: '下载测速'
+    }[phase] || '测速中';
+  }
+  return {
+    completed: '完成',
+    failed: '失败'
+  }[phase] || '未测试';
 }
 
 function formatBytesPerSecond(bytes) {
