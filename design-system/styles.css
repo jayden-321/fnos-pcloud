@@ -1,0 +1,7 @@
+/* pCloud NAS Sync — Design System entry point.
+   Consumers link this one file. It is an @import manifest only; never add rules
+   here directly. Every token and @font-face ships through this closure. */
+
+@import "tokens/colors.css";
+@import "tokens/typography.css";
+@import "tokens/spacing.css";

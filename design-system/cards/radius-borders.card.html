@@ -1,0 +1,25 @@
+<!-- @dsCard group="Spacing" viewport="700x170" name="Radius & borders" subtitle="6 / 8px corners · 1px lines, flat surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; font-family: var(--font-ui); color: var(--text); background: var(--bg); padding: 22px; }
+  .row { display: flex; gap: 20px; align-items: center; }
+  .box { background: var(--panel); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); }
+  .b-sm { width: 120px; height: 64px; border-radius: 6px; }
+  .b-md { width: 120px; height: 64px; border-radius: 8px; }
+  .b-pill { width: 120px; height: 64px; border-radius: 22%; background: var(--brand-green); color: #fff; font-weight: 700; border: 0; }
+  .cap { font-size: 11px; font-family: var(--font-mono); color: var(--muted); margin-top: 8px; text-align: center; }
+  .col { display: flex; flex-direction: column; align-items: center; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="col"><div class="box b-sm">button / input</div><div class="cap">6px · sm</div></div>
+    <div class="col"><div class="box b-md">card / panel</div><div class="cap">8px · md</div></div>
+    <div class="col"><div class="box b-pill">app tile</div><div class="cap">22% · tile</div></div>
+  </div>
+</body>
+</html>

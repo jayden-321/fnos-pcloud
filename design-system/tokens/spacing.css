@@ -1,0 +1,46 @@
+/* pCloud NAS Sync — Spacing, radius, border & elevation tokens
+   Distilled from the product layout: an 8px-ish rhythm with a handful of
+   workspace-scale steps (18 / 22 / 28 / 32). */
+
+:root {
+  /* ---- Spacing scale ---- */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 14px;
+  --space-7: 16px;
+  --space-8: 18px;
+  --space-9: 22px;
+  --space-10: 28px;
+  --space-11: 32px;
+
+  /* ---- Radius ---- */
+  --radius-sm: 6px;    /* buttons, inputs, selects */
+  --radius-md: 8px;    /* cards, panels, dialogs, toast */
+  --radius-tile: 22%;  /* app-icon squircle ratio */
+
+  /* ---- Border ---- */
+  --border: 1px solid var(--line);
+  --border-width: 1px;
+
+  /* ---- Control sizing ---- */
+  --control-h: 36px;       /* buttons, soft selects */
+  --nav-h: 40px;           /* sidebar items */
+  --input-pad-y: 9px;
+  --input-pad-x: 10px;
+  --btn-pad-x: 14px;
+
+  /* ---- Layout ---- */
+  --sidebar-w: 228px;
+  --workspace-pad: 28px 32px 48px;
+
+  /* ---- Elevation ---- */
+  /* The product is intentionally flat: structure comes from 1px lines and
+     surface fills, not drop shadows. The only shadow in the system is the
+     dialog scrim. Cards = fill + border, never a box-shadow. */
+  --shadow-none: none;
+  --shadow-toast: 0 8px 24px rgb(15 23 42 / 0.22);
+  --shadow-dialog: 0 18px 50px rgb(15 23 42 / 0.28);
+}

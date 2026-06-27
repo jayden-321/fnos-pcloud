@@ -1,0 +1,25 @@
+<!-- @dsCard group="Colors" viewport="700x160" name="Surfaces & text" subtitle="Canvas, sidebar, panels, ink" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; font-family: var(--font-ui); color: var(--text); background: var(--panel); }
+  .row { display: flex; gap: 14px; padding: 20px; flex-wrap: wrap; }
+  .sw { width: 120px; }
+  .chip { height: 52px; border-radius: var(--radius-md); border: 1px solid var(--line); }
+  .name { font-size: 12px; font-weight: 700; margin-top: 8px; }
+  .hex { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:var(--bg)"></div><div class="name">Canvas</div><div class="hex">#f6f8fb</div></div>
+    <div class="sw"><div class="chip" style="background:var(--sidebar)"></div><div class="name">Sidebar</div><div class="hex">#edf2f7</div></div>
+    <div class="sw"><div class="chip" style="background:var(--panel)"></div><div class="name">Panel</div><div class="hex">#ffffff</div></div>
+    <div class="sw"><div class="chip" style="background:var(--text)"></div><div class="name">Text</div><div class="hex">#17202a</div></div>
+    <div class="sw"><div class="chip" style="background:var(--muted)"></div><div class="name">Muted</div><div class="hex">#728199</div></div>
+  </div>
+</body>
+</html>
