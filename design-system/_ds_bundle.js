@@ -172,7 +172,7 @@ Object.assign(__ds_scope, { Field, Input, Select, Textarea });
 // components/core/MetricCard.jsx
 try { (() => {
 /**
- * MetricCard — a single dashboard statistic tile (大数字 + small label),
+ * MetricCard — a single dashboard statistic tile (large number plus small label),
  * exactly as used in the sync-tasks metrics strip.
  */
 function MetricCard({
@@ -265,23 +265,23 @@ try { (() => {
 const STATUS = {
   success: {
     color: 'var(--green)',
-    label: '成功'
+    label: 'Success'
   },
   failed: {
     color: 'var(--danger)',
-    label: '失败'
+    label: 'Failed'
   },
   uploading: {
     color: 'var(--accent)',
-    label: '上传中'
+    label: 'Uploading'
   },
   queued: {
     color: 'var(--queued)',
-    label: '待处理'
+    label: 'Queued'
   },
   existing: {
     color: 'var(--muted)',
-    label: '已存在'
+    label: 'Existing'
   }
 };
 function StatusPill({
@@ -357,7 +357,7 @@ function TaskCard({
   stats = {},
   actions
 }) {
-  const items = [['总', stats.total], ['已存在', stats.existing], ['已成功', stats.synced], ['待上传', stats.pending], ['失败', stats.failed]].filter(([, v]) => v !== undefined && v !== null);
+  const items = [['Total', stats.total], ['Existing', stats.existing], ['Uploaded', stats.synced], ['Pending upload', stats.pending], ['Failed', stats.failed]].filter(([, v]) => v !== undefined && v !== null);
   return /*#__PURE__*/React.createElement("article", {
     style: {
       background: 'var(--panel)',
@@ -447,16 +447,16 @@ function App() {
     onTab: setTab,
     onCreate: () => {
       setTab('settings');
-      showToast('已新增空白任务');
+      showToast('Added a blank task');
     }
   }), /*#__PURE__*/React.createElement("main", {
     className: "workspace"
   }, tab === 'tasks' && /*#__PURE__*/React.createElement(TasksScreen, {
     data: data,
-    onScan: () => showToast('扫描已触发'),
-    onForce: () => showToast('远端重新比对已触发'),
-    onStop: () => showToast('正在停止同步'),
-    onRetry: () => showToast('3 个已入队，0 个失败'),
+    onScan: () => showToast('Scan started'),
+    onForce: () => showToast('Remote comparison started'),
+    onStop: () => showToast('Stopping sync'),
+    onRetry: () => showToast('3 queued, 0 failed'),
     onLogs: () => setTab('logs'),
     onEdit: () => setTab('settings')
   }), tab === 'logs' && /*#__PURE__*/React.createElement(LogsScreen, {
@@ -484,15 +484,15 @@ window.KIT_DATA = {
   version: '0.3.7',
   tasks: [{
     id: 't1',
-    name: '财务备份',
+    name: 'Finance backup',
     enabled: true,
     localPath: '/vol1/1000/finance',
     remotePath: '/Sync/Finance',
-    schedule: '每天 02:00',
+    schedule: 'Daily 02:00',
     status: 'success',
-    statusLabel: '同步完成',
-    scanMode: '远端增量',
-    scanDetail: '本地 1,284 · 远端 1,266 · 本地扫描 0.4s · 远端增量 0.2s',
+    statusLabel: 'Sync complete',
+    scanMode: 'Remote diff',
+    scanDetail: 'Local 1,284 · Remote 1,266 · Local scan 0.4s · Remote diff 0.2s',
     stats: {
       total: 1284,
       existing: 1266,
@@ -502,15 +502,15 @@ window.KIT_DATA = {
     }
   }, {
     id: 't2',
-    name: '照片归档',
+    name: 'Photo archive',
     enabled: true,
     localPath: '/vol1/1000/photos',
     remotePath: '/Sync/Photos',
-    schedule: '按间隔 300s',
+    schedule: 'Every 300s',
     status: 'uploading',
-    statusLabel: '同步中',
-    scanMode: '远端全量比对',
-    scanDetail: '本地 8,420 · 远端 8,100 · 本地扫描 1.8s · 远端列举 6.4s',
+    statusLabel: 'Syncing',
+    scanMode: 'Full remote comparison',
+    scanDetail: 'Local 8,420 · Remote 8,100 · Local scan 1.8s · Remote listing 6.4s',
     stats: {
       total: 8420,
       existing: 8100,
@@ -520,15 +520,15 @@ window.KIT_DATA = {
     }
   }, {
     id: 't3',
-    name: '工作文档',
+    name: 'Work documents',
     enabled: true,
     localPath: '/vol1/1000/work',
     remotePath: '/Sync/Work',
-    schedule: '每周 一 09:00',
+    schedule: 'Weekly Mon 09:00',
     status: 'failed',
-    statusLabel: '同步中',
-    scanMode: '本地缓存',
-    scanDetail: '本地 542 · 时间不同 3',
+    statusLabel: 'Syncing',
+    scanMode: 'Local cache',
+    scanDetail: 'Local 542 · Mtime differs 3',
     stats: {
       total: 542,
       existing: 528,
@@ -543,7 +543,7 @@ window.KIT_DATA = {
     task: 'finance',
     time: '2026-06-27 02:00:14',
     status: 'success',
-    statusText: '成功',
+    statusText: 'Success',
     progress: ''
   }, {
     file: 'photos/2026/IMG_4821.HEIC',
@@ -551,7 +551,7 @@ window.KIT_DATA = {
     task: 'photos',
     time: '2026-06-27 02:14:03',
     status: 'uploading',
-    statusText: '上传中',
+    statusText: 'Uploading',
     progress: '1.9 MB / 3.1 MB (61%)'
   }, {
     file: 'photos/2026/IMG_4820.HEIC',
@@ -559,7 +559,7 @@ window.KIT_DATA = {
     task: 'photos',
     time: '2026-06-27 02:13:58',
     status: 'success',
-    statusText: '成功',
+    statusText: 'Success',
     progress: ''
   }, {
     file: 'work/contracts/lease-final.pdf',
@@ -567,7 +567,7 @@ window.KIT_DATA = {
     task: 'work',
     time: '2026-06-27 02:01:22',
     status: 'failed',
-    statusText: '失败',
+    statusText: 'Failed',
     progress: ''
   }, {
     file: 'finance/2026/invoices-jan.zip',
@@ -575,7 +575,7 @@ window.KIT_DATA = {
     task: 'finance',
     time: '2026-06-27 02:00:09',
     status: 'success',
-    statusText: '成功',
+    statusText: 'Success',
     progress: ''
   }, {
     file: 'work/notes/standup.md',
@@ -583,7 +583,7 @@ window.KIT_DATA = {
     task: 'work',
     time: '2026-06-27 02:01:05',
     status: 'success',
-    statusText: '成功',
+    statusText: 'Success',
     progress: ''
   }, {
     file: 'photos/2026/IMG_4815.HEIC',
@@ -591,7 +591,7 @@ window.KIT_DATA = {
     task: 'photos',
     time: '2026-06-27 02:12:40',
     status: 'success',
-    statusText: '成功',
+    statusText: 'Success',
     progress: ''
   }],
   totals: {
@@ -629,13 +629,13 @@ const {
 } = DS;
 const TABS = [{
   id: 'tasks',
-  label: '同步任务'
+  label: 'Sync Tasks'
 }, {
   id: 'logs',
-  label: '同步日志'
+  label: 'Sync Logs'
 }, {
   id: 'settings',
-  label: '设置'
+  label: 'Settings'
 }];
 function Sidebar({
   tab,
@@ -678,34 +678,34 @@ function TasksScreen({
   const t = data.totals;
   const metrics = [{
     v: t.total.toLocaleString(),
-    l: '总文件'
+    l: 'Total files'
   }, {
     v: t.synced,
-    l: '已成功',
+    l: 'Uploaded',
     tone: 'success'
   }, {
     v: t.existing.toLocaleString(),
-    l: '已存在'
+    l: 'Existing'
   }, {
     v: t.failed,
-    l: '失败',
+    l: 'Failed',
     tone: 'danger'
   }, {
     v: t.pending,
-    l: '待上传'
+    l: 'Pending upload'
   }, {
     v: t.uploading,
-    l: '上传中',
+    l: 'Uploading',
     tone: 'accent'
   }, {
     v: t.speed,
-    l: '上传速度',
+    l: 'Upload speed',
     tone: 'accent'
   }];
   const queue = [{
     status: 'failed',
     key: 'work/contracts/lease-final.pdf',
-    error: '上传超时（已重试 2 次）'
+    error: 'Upload timed out (retried 2 times)'
   }, {
     status: 'pending',
     key: 'photos/2026/IMG_4822.HEIC',
@@ -775,9 +775,9 @@ function TasksScreen({
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(StatusPill, {
     status: r.status
   }, {
-    failed: '失败',
-    pending: '待上传',
-    uploading: '上传中'
+    failed: 'Failed',
+    pending: 'Pending upload',
+    uploading: 'Uploading'
   }[r.status])), /*#__PURE__*/React.createElement("td", {
     style: {
       fontFamily: 'var(--font-mono)',
@@ -850,7 +850,7 @@ function SpeedTestPanel({
 }) {
   const [size, setSize] = React.useState('50');
   const [state, setState] = React.useState({
-    status: '未测试',
+    status: 'Not tested',
     up: '--',
     down: '--',
     check: '--'
@@ -859,21 +859,21 @@ function SpeedTestPanel({
   function run() {
     setRunning(true);
     setState({
-      status: '测试中…',
+      status: 'Testing...',
       up: '--',
       down: '--',
       check: '--'
     });
-    onToast(size + ' MB 测速已开始');
+    onToast(size + ' MB speed test started');
     setTimeout(() => {
       setState({
-        status: '完成',
+        status: 'Complete',
         up: '11.4 MB/s',
         down: '23.8 MB/s',
-        check: '通过'
+        check: 'Passed'
       });
       setRunning(false);
-      onToast('测速完成');
+      onToast('Speed test complete');
     }, 1600);
   }
   return /*#__PURE__*/React.createElement(Panel, {
@@ -900,7 +900,7 @@ function SpeedTestPanel({
   }, "100 MB"))), /*#__PURE__*/React.createElement(Button, {
     onClick: run,
     disabled: running
-  }, running ? '测速中' : '开始测速')), /*#__PURE__*/React.createElement("div", {
+  }, running ? 'Testing' : 'Start Test')), /*#__PURE__*/React.createElement("div", {
     className: "speed-test-result"
   }, /*#__PURE__*/React.createElement("span", null, "\u72B6\u6001\uFF1A", /*#__PURE__*/React.createElement("b", null, state.status)), /*#__PURE__*/React.createElement("span", null, "\u4E0A\u4F20\u901F\u5EA6\uFF1A", /*#__PURE__*/React.createElement("b", null, state.up)), /*#__PURE__*/React.createElement("span", null, "\u4E0B\u8F7D\u901F\u5EA6\uFF1A", /*#__PURE__*/React.createElement("b", null, state.down)), /*#__PURE__*/React.createElement("span", null, "\u6821\u9A8C\uFF1A", /*#__PURE__*/React.createElement("b", null, state.check))), /*#__PURE__*/React.createElement("small", {
     style: {
@@ -1073,7 +1073,7 @@ function FolderDialog({
     style: {
       fontSize: 16
     }
-  }, kind === 'local' ? '选择本地文件夹' : '选择 pCloud 文件夹'), /*#__PURE__*/React.createElement(Button, {
+  }, kind === 'local' ? 'Choose Local Folder' : 'Choose pCloud Folder'), /*#__PURE__*/React.createElement(Button, {
     variant: "soft",
     onClick: onClose
   }, "\u5173\u95ED")), /*#__PURE__*/React.createElement("div", {
@@ -1085,7 +1085,7 @@ function FolderDialog({
     onClick: () => setPath(path.split('/').slice(0, -1).join('/') || '/')
   }, "\u4E0A\u4E00\u7EA7"), /*#__PURE__*/React.createElement(Button, {
     onClick: () => {
-      onToast('已选择 ' + path);
+      onToast('Selected ' + path);
       onClose();
     }
   }, "\u9009\u62E9\u5F53\u524D\u6587\u4EF6\u5939")), /*#__PURE__*/React.createElement("ul", {

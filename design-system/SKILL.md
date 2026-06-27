@@ -11,7 +11,7 @@ If creating visual artifacts (slides, mocks, throwaway prototypes, etc), copy as
 If the user invokes this skill without any other guidance, ask them what they want to build or design, ask some questions, and act as an expert designer who outputs HTML artifacts _or_ production code, depending on the need.
 
 ## Quick facts
-- **Product:** pCloud NAS Sync — a self-hosted fnOS Docker control panel for one-way NAS→pCloud backup. UI is **Simplified Chinese (zh-CN)**.
+- **Product:** pCloud NAS Sync — a self-hosted fnOS Docker control panel for one-way NAS-to-pCloud backup. UI copy is **English**.
 - **Accent:** interface blue `#2775df` (hover `#1c5db3`); brand mark green `#1d6f5f` + yellow `#f2c14e` (icon only).
 - **Type:** native OS UI stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`), no webfonts. Base 14px/1.45.
 - **Look:** flat, light, 1px lines, 6/8px radii, **no shadows** (except dialog scrim + toast), no gradients, no imagery, **text-first / near icon-free**.
@@ -23,4 +23,4 @@ If the user invokes this skill without any other guidance, ask them what they wa
 - `ui_kits/pcloud-sync/` — full interactive product recreation to copy from.
 - `assets/` — app icon.
 
-Stay text-first and in Simplified Chinese to match the product. Source: https://github.com/jayden-321/fnos-pcloud
+Stay text-first and in English to match the product. Source: https://github.com/jayden-321/fnos-pcloud

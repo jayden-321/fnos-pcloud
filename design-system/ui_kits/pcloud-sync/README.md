@@ -5,11 +5,11 @@ An interactive, high-fidelity recreation of the **pCloud NAS Sync** product UI
 not re-implement them.
 
 ## Screens
-- **同步任务 / Sync Tasks** (`TasksScreen`) — header actions, 7-up metrics strip,
+- **Sync Tasks / Sync Tasks** (`TasksScreen`) — header actions, 7-up metrics strip,
   task cards, live queue table.
-- **同步日志 / Sync Logs** (`LogsScreen`) — filterable file-level log table.
-- **设置 / Settings** (`SettingsScreen`) — per-task editors, pCloud authorization,
-  sync rules, and the **pCloud 速度测试 / speed-test** panel (`SpeedTestPanel`).
+- **Sync Logs / Sync Logs** (`LogsScreen`) — filterable file-level log table.
+- **Settings / Settings** (`SettingsScreen`) — per-task editors, pCloud authorization,
+  sync rules, and the **pCloud speed test** panel (`SpeedTestPanel`).
 - **Folder picker** (`FolderDialog`) — local / remote folder browser modal.
 
 ## Interactions
@@ -26,4 +26,4 @@ runnable speed test (start → running → result).
   `SpeedTestPanel`, `FolderDialog`.
 - `app.jsx` — tab state, toast, dialog wiring.
 
-Language is Simplified Chinese (zh-CN), matching the real product.
+Language is English, matching the public repository copy.

@@ -13,15 +13,15 @@ export interface TaskCardProps {
   name: React.ReactNode;
   /** Sync status driving the status-line color. @default "queued" */
   status?: 'success' | 'failed' | 'uploading' | 'queued' | 'existing';
-  /** Override the status label text (e.g. "同步完成"). */
+  /** Override the status label text (e.g. "Sync complete"). */
   statusLabel?: React.ReactNode;
-  /** Scan-source descriptor, e.g. "远端全量比对". */
+  /** Scan-source descriptor, e.g. "Full remote comparison". */
   scanMode?: React.ReactNode;
-  /** Secondary scan detail line, e.g. "本地 1,284 · 远端 1,266". */
+  /** Secondary scan detail line, e.g. "Local 1,284 · Remote 1,266". */
   scanDetail?: React.ReactNode;
   /** Inline counts shown in the stat grid. */
   stats?: TaskStats;
-  /** Custom action buttons; defaults to 查看日志 / 编辑. */
+  /** Custom action buttons; defaults to View Logs / Edit. */
   actions?: React.ReactNode;
 }
 

@@ -17,11 +17,11 @@ export function TaskCard({
   actions,
 }) {
   const items = [
-    ['总', stats.total],
-    ['已存在', stats.existing],
-    ['已成功', stats.synced],
-    ['待上传', stats.pending],
-    ['失败', stats.failed],
+    ['Total', stats.total],
+    ['Existing', stats.existing],
+    ['Uploaded', stats.synced],
+    ['Pending upload', stats.pending],
+    ['Failed', stats.failed],
   ].filter(([, v]) => v !== undefined && v !== null);
 
   return (
@@ -48,7 +48,7 @@ export function TaskCard({
             <StatusPill status={status}>{statusLabel}</StatusPill>
           </p>
           {scanMode && (
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)' }}>扫描依据：{scanMode}</p>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)' }}>Scan source：{scanMode}</p>
           )}
           {scanDetail && (
             <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)' }}>{scanDetail}</p>
@@ -71,8 +71,8 @@ export function TaskCard({
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
           {actions ?? (
             <>
-              <Button variant="soft">查看日志</Button>
-              <Button variant="soft">编辑</Button>
+              <Button variant="soft">View Logs</Button>
+              <Button variant="soft">Edit</Button>
             </>
           )}
         </div>

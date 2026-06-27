@@ -22,16 +22,16 @@
     return (
       <div>
         <div className="cols">
-          <Field label="任务名称"><Input placeholder="例如 财务备份" /></Field>
-          <Field label="上传后校验" note="校验会调用 pCloud checksumfile。">
-            <Select><option>不校验</option><option>失败后校验</option><option>全部校验</option></Select>
+          <Field label="Task name"><Input placeholder="e.g. Finance backup" /></Field>
+          <Field label="Post-upload verification" note="Verification calls pCloud checksumfile.">
+            <Select><option>Off</option><option>Verify failed uploads</option><option>Verify all uploads</option></Select>
           </Field>
         </div>
         <div className="metrics">
-          <MetricCard value="1,284" label="总文件" />
-          <MetricCard value="248" label="已成功" tone="success" />
-          <MetricCard value="3" label="失败" tone="danger" />
-          <MetricCard value="1.2 MB/s" label="上传速度" tone="accent" />
+          <MetricCard value="1,284" label="Total files" />
+          <MetricCard value="248" label="Uploaded" tone="success" />
+          <MetricCard value="3" label="Failed" tone="danger" />
+          <MetricCard value="1.2 MB/s" label="Upload speed" tone="accent" />
         </div>
       </div>
     );

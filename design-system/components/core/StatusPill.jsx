@@ -5,11 +5,11 @@ import React from 'react';
  * It is weight-700 colored text (not a filled badge) per the product style.
  */
 const STATUS = {
-  success: { color: 'var(--green)', label: '成功' },
-  failed: { color: 'var(--danger)', label: '失败' },
-  uploading: { color: 'var(--accent)', label: '上传中' },
-  queued: { color: 'var(--queued)', label: '待处理' },
-  existing: { color: 'var(--muted)', label: '已存在' },
+  success: { color: 'var(--green)', label: 'Success' },
+  failed: { color: 'var(--danger)', label: 'Failed' },
+  uploading: { color: 'var(--accent)', label: 'Uploading' },
+  queued: { color: 'var(--queued)', label: 'Queued' },
+  existing: { color: 'var(--muted)', label: 'Existing' },
 };
 
 export function StatusPill({ status = 'queued', children, style = {} }) {

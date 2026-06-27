@@ -2,9 +2,8 @@
    The product ships no webfonts; it leans on the native OS UI stack so the app
    feels at home inside fnOS on macOS, Windows, and Linux. This is the exact
    stack from the product stylesheet — the generic OS faces (-apple-system /
-   Segoe UI) already resolve to system fonts that include CJK glyphs, with
-   sans-serif as the final catch-all, so Simplified Chinese renders natively
-   without naming a specific CJK family. */
+   Segoe UI) cover broad Unicode ranges, with sans-serif as the final catch-all,
+   so no bundled font file is needed. */
 
 :root {
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

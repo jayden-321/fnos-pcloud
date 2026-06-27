@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * MetricCard — a single dashboard statistic tile (大数字 + small label),
+ * MetricCard — a single dashboard statistic tile (large number plus small label),
  * exactly as used in the sync-tasks metrics strip.
  */
 export function MetricCard({ value, label, tone = 'default', style = {} }) {

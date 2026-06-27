@@ -5,7 +5,7 @@ Docker-based **fnOS** application that performs one-way backup of selected NAS
 folders to **pCloud** over OAuth 2.0. The UI is a small, utilitarian,
 self-hosted control panel — three tabs (Sync Tasks, Sync Logs, Settings), a
 left navigation rail, metric tiles, task cards, log tables, and folder-picker
-dialogs. It ships entirely in **Simplified Chinese (zh-CN)**.
+dialogs. It ships entirely in **English**.
 
 This system captures that product's visual language so you can design new
 pCloud-NAS-Sync surfaces — additional screens, marketing pages, slides, or
@@ -42,38 +42,38 @@ optional checksum verification. There is no marketing site and no mobile app —
 
 ## CONTENT FUNDAMENTALS
 
-**Language.** Primary and only UI language is **Simplified Chinese**. Technical
-nouns stay in English/Latin where they are proper names or units: `pCloud`,
+**Language.** Primary and only UI language is **English**. Technical nouns keep
+their official spelling where they are proper names or units: `pCloud`,
 `Client ID`, `Client Secret`, `Token`, `Access Token`, `NAS`, `B/s`, `MB`,
-`checksumfile`, file paths (`/vol1/1000/photos`). Everything else is Chinese.
+`checksumfile`, and file paths such as `/vol1/1000/photos`.
 
 **Voice.** Terse, operational, neutral — a systems utility, not a consumer
-brand. Labels are nouns or noun phrases (`同步任务`, `队列状态`, `上传速度`);
-buttons are imperative verbs (`立即扫描`, `远端重新比对`, `停止同步`, `重试失败`,
-`保存设置`, `换取 Token`). No marketing adjectives, no exclamation, no emoji in
+brand. Labels are nouns or noun phrases (`Sync Tasks`, `Queue Status`, `Upload speed`);
+buttons are imperative verbs (`Scan Now`, `Force Remote Compare`, `Stop Sync`, `Retry Failed`,
+`Save Settings`, `Exchange Token`). No marketing adjectives, no exclamation, no emoji in
 product copy.
 
 **Person.** The UI rarely addresses the user directly — it labels state and
 actions, not "you/your". Helper notes are impersonal advisories, e.g.
-*"默认不做全量校验；校验会调用 pCloud checksumfile，文件多时会更慢。"* and
-*"0 表示不按时间删除。"*
+*"Full verification is off by default; verification calls pCloud checksumfile and can be slower for large file sets."* and
+*"0 disables age-based deletion."*
 
-**Casing & punctuation.** Chinese needs no casing. English fragments use natural
-casing of the proper noun (`pCloud`, not `Pcloud`). Mixed CJK/Latin lines put a
-space around Latin runs (`换取 Token`, `pCloud 文件夹`). Counts use
-`Intl.NumberFormat('zh-CN')` thousands separators (`1,284`).
+**Casing & punctuation.** Use sentence-style English for helper text and title
+case for short navigation labels and panel headings. Keep proper nouns exact
+(`pCloud`, not `Pcloud`). Counts use standard comma thousands separators
+(`1,284`).
 
 **Status vocabulary (use verbatim):**
-- 未扫描 (not scanned) · 扫描中 (scanning) · 同步中 (syncing) · 同步完成 (done)
-- 成功 (success) · 失败 (failed) · 上传中 (uploading) · 待上传 / 待处理 (pending)
-- 已存在 (existing) · 总文件 (total) · 已成功 (synced) · 上传速度 (speed)
-- 扫描依据 (scan source): 远端全量比对 / 本地缓存 / 远端增量
+- Not scanned (not scanned) · Scanning (scanning) · Syncing (syncing) · Sync complete (done)
+- Success (success) · Failed (failed) · Uploading (uploading) · Pending upload / Queued (pending)
+- Existing (existing) · Total files (total) · Uploaded (synced) · Upload speed (speed)
+- Scan source (scan source): Full remote comparison / Local cache / Remote diff
 
 **Microcopy examples.**
-- Empty state: *"还没有同步任务 — 创建一个任务，选择本地文件夹和 pCloud 目标文件夹后即可开始同步。"*
-- Toast: *"扫描已触发"*, *"Token 已保存"*, *"已删除 128 条日志"*, *"正在停止同步"*.
-- Placeholder: *"例如 财务备份"*, *"/vol1/1000/work"*, *"搜索文件名称"*,
-  *"已保存时可留空"*.
+- Empty state: *"No sync tasks yet - create a task, choose a local folder and a pCloud destination, then start syncing."*
+- Toast: *"Scan started"*, *"Token saved"*, *"Deleted 128 log entries"*, *"Stopping sync"*.
+- Placeholder: *"e.g. Finance backup"*, *"/vol1/1000/work"*, *"Search file name"*,
+  *"Leave blank if already saved"*.
 
 **Vibe.** Honest, transparent, slightly nerdy. The product over-discloses
 internal mechanics (scan source, local/remote timings, mtime mismatches) rather
@@ -103,9 +103,8 @@ surface fills, never drop shadows.**
 
 **Type.** No webfonts — the native OS UI stack (`-apple-system,
 BlinkMacSystemFont, "Segoe UI", sans-serif`), exactly as the product ships it.
-The generic OS faces already include CJK glyphs (with `sans-serif` as the final
-catch-all), so Simplified Chinese renders natively without naming a specific CJK
-family. Base body
+The generic OS faces cover broad Unicode ranges (with `sans-serif` as the final
+catch-all), so the UI stays native without bundled font files. Base body
 14px/1.45. Scale: 12 (notes) · 13 (stats, table heads) · 14 (body) · 16 (nav) ·
 20 (task titles, weight 700) · 24 (page title) · 26 (metric numbers, weight
 760). Weights cluster at 650 (labels), 700 (buttons/status), 760 (metrics).
@@ -156,9 +155,9 @@ product UI), not stylized.
 The product is **almost icon-free** — a deliberate, text-first interface.
 
 - **No icon font, no SVG icon set, no sprite.** Navigation and actions are pure
-  Chinese text labels. This is the defining iconography decision: do not add an
+  English text labels. This is the defining iconography decision: do not add an
   icon library where the product uses words.
-- **Unicode glyphs as the only "icons":** a fullwidth plus `＋` prefixes "创建新任务",
+- **Unicode glyphs as the only "icons":** a plain plus `+` prefixes "Create New Task",
   and folder rows in the picker use the `📁` emoji. These are the sole
   pictographic elements. (The `📁` is the one emoji in the system; use it only in
   folder listings, nowhere else.)
@@ -187,9 +186,9 @@ it is not in the source product.
 
 > **Font note:** the system intentionally has **no `@font-face`** — it uses the
 > product's exact OS-native UI stack (`-apple-system, BlinkMacSystemFont,
-> "Segoe UI", sans-serif`). Those generic faces already resolve to system fonts
-> that include CJK glyphs, so no CJK family is named and **no font files are
-> needed** — everything renders from the user's operating system.
+> "Segoe UI", sans-serif`). Those generic faces cover broad Unicode ranges, so
+> **no font files are needed** — everything renders from the user's operating
+> system.
 
 ---
 
