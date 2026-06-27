@@ -210,6 +210,32 @@
       </form>
     </dialog>
 
+    <dialog id="mtimeDetailsDialog">
+      <form method="dialog" class="details-dialog">
+        <header>
+          <div>
+            <h3 id="mtimeDetailsTitle">时间校验详情</h3>
+            <p id="mtimeDetailsSummary"></p>
+          </div>
+          <button value="cancel" type="submit">关闭</button>
+        </header>
+        <div class="table-wrap mtime-details-table">
+          <table>
+            <thead>
+              <tr>
+                <th>文件</th>
+                <th>大小</th>
+                <th>状态</th>
+                <th>时间</th>
+                <th>原因</th>
+              </tr>
+            </thead>
+            <tbody id="mtimeDetailsRows"></tbody>
+          </table>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" role="status"></div>
     <script src="/app.js" type="module"></script>
   </body>

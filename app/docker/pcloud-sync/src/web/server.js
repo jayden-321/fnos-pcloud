@@ -92,6 +92,13 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     return json(await listLocalFolders(url.searchParams.get('path') || '', roots));
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/mtime-mismatches') {
+    return json(await listMtimeMismatchDetails(store, {
+      taskId: url.searchParams.get('taskId') || '',
+      status: url.searchParams.get('status') || ''
+    }));
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/pcloud/folders') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
@@ -311,6 +318,37 @@ async function mtimeVerificationStats(store, taskId) {
     }
   }
   return stats;
+}
+
+async function listMtimeMismatchDetails(store, { taskId = '', status = '' } = {}) {
+  const normalizedTaskId = String(taskId || '').trim();
+  const normalizedStatus = String(status || '').trim();
+  const allowedStatuses = new Set(['matched', 'mismatched', 'failed', '']);
+  const targetStatus = allowedStatuses.has(normalizedStatus) ? normalizedStatus : '';
+  const filter = { status: 'existing' };
+  if (normalizedTaskId) {
+    filter.sourceId = normalizedTaskId;
+  }
+  const candidates = (await store.listFiles(filter))
+    .filter((file) => file.mtimeMismatch === true)
+    .filter((file) => !targetStatus || file.mtimeMismatchStatus === targetStatus)
+    .sort((a, b) => String(a.key).localeCompare(String(b.key)));
+  return {
+    taskId: normalizedTaskId,
+    status: targetStatus,
+    total: candidates.length,
+    files: candidates.slice(0, 500).map((file) => ({
+      key: file.key,
+      sourceId: file.sourceId || '',
+      relativePath: file.relativePath || file.key,
+      remotePath: file.pcloudPath || file.remotePath || '',
+      pcloudFileId: file.pcloudFileId ?? null,
+      size: Number(file.size || 0),
+      status: file.mtimeMismatchStatus || '',
+      error: file.mtimeMismatchError || file.checksumSampleError || '',
+      verifiedAt: file.mtimeMismatchVerifiedAt || file.checksumVerifiedAt || ''
+    }))
+  };
 }
 
 function contentType(filePath) {

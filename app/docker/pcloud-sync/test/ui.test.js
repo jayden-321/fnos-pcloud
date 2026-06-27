@@ -127,6 +127,25 @@ test('task cards show scan source labels from engine queue state', async () => {
   assert.match(script, /\/api\/verify-mtime-mismatches/);
 });
 
+test('task cards expose a compact mtime verification menu and details dialog', async () => {
+  const [html, script, styles] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="mtimeDetailsDialog"/);
+  assert.match(html, /id="mtimeDetailsRows"/);
+  assert.match(script, /data-action="mtime-menu"/);
+  assert.match(script, /全部校验时间不同/);
+  assert.match(script, /查看内容不一致/);
+  assert.match(script, /查看校验失败/);
+  assert.match(script, /loadMtimeMismatchDetails/);
+  assert.match(script, /\/api\/mtime-mismatches/);
+  assert.match(styles, /task-action-select/);
+  assert.match(styles, /mtime-details-table/);
+});
+
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {
   const [html, script, styles] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),

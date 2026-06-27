@@ -158,6 +158,56 @@ test('HTTP API starts full mtime-mismatch verification', async () => {
   assert.equal((await response.json()).running, true);
 });
 
+test('HTTP API lists mtime-mismatch verification details by task and status', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-mtime-details-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  await store.upsertFile({
+    key: 'docs/a.txt',
+    sourceId: 'docs',
+    absolutePath: '/vol1/docs/a.txt',
+    relativePath: 'a.txt',
+    remotePath: '/Sync/docs/a.txt',
+    pcloudFileId: 11,
+    status: 'existing',
+    size: 5,
+    mtimeMismatch: true,
+    mtimeMismatchStatus: 'mismatched',
+    mtimeMismatchError: 'pCloud checksum verification failed'
+  });
+  await store.upsertFile({
+    key: 'docs/b.txt',
+    sourceId: 'docs',
+    absolutePath: '/vol1/docs/b.txt',
+    relativePath: 'b.txt',
+    remotePath: '/Sync/docs/b.txt',
+    pcloudFileId: 12,
+    status: 'existing',
+    size: 8,
+    mtimeMismatch: true,
+    mtimeMismatchStatus: 'failed',
+    mtimeMismatchError: 'ENOENT'
+  });
+  await store.upsertFile({
+    key: 'pics/c.jpg',
+    sourceId: 'pics',
+    status: 'existing',
+    size: 9,
+    mtimeMismatch: true,
+    mtimeMismatchStatus: 'mismatched'
+  });
+
+  const app = createApp({ store, engine: {} });
+  const response = await app.fetch(new Request('http://local/api/mtime-mismatches?taskId=docs&status=mismatched'));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.total, 1);
+  assert.deepEqual(body.files.map((file) => [file.key, file.relativePath, file.size, file.pcloudFileId, file.error]), [
+    ['docs/a.txt', 'a.txt', 5, 11, 'pCloud checksum verification failed']
+  ]);
+});
+
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
   const store = new SqliteStore(dir);

@@ -7,6 +7,7 @@ const toast = document.querySelector('#toast');
 const taskEditors = document.querySelector('#taskEditors');
 const taskCards = document.querySelector('#taskCards');
 const folderDialog = document.querySelector('#folderDialog');
+const mtimeDetailsDialog = document.querySelector('#mtimeDetailsDialog');
 let currentConfig = null;
 let currentStatus = null;
 let currentEvents = [];
@@ -48,10 +49,14 @@ document.body.addEventListener('click', (event) => {
   if (button && !button.classList.contains('nav-item')) {
     showTab(button.dataset.tab);
   }
-  const actionButton = event.target.closest('button[data-action="verify-mtime"]');
-  if (actionButton) {
-    verifyMtimeMismatches(actionButton.dataset.taskId);
+});
+
+document.body.addEventListener('change', (event) => {
+  const menu = event.target.closest('select[data-action="mtime-menu"]');
+  if (!menu) {
+    return;
   }
+  handleMtimeMenu(menu);
 });
 
 document.querySelector('#createTask').addEventListener('click', () => {
@@ -269,9 +274,10 @@ function renderTaskCards() {
     const verifyRunning = verificationJob?.running === true;
     const verifyLabel = verifyRunning
       ? `校验中 ${formatNumber(verificationJob.checked || 0)}/${formatNumber(verificationJob.totalCandidates || 0)}`
-      : '全部校验';
+      : '时间校验';
     const verifySummary = mtimeVerificationText(mtimeVerification, verificationJob);
     const mtimeMismatches = Number(queue?.mtimeMismatches ?? taskStats.remoteState?.lastMtimeMismatches ?? 0);
+    const showMtimeMenu = mtimeMismatches > 0 || Number(mtimeVerification.mismatched || 0) > 0 || Number(mtimeVerification.failed || 0) > 0;
     return `
       <article class="task-card">
         <div class="task-card-main">
@@ -291,7 +297,7 @@ function renderTaskCards() {
           </div>
           <div class="task-card-actions">
             <button type="button" data-tab="logs">查看日志</button>
-            ${mtimeMismatches > 0 ? `<button type="button" data-action="verify-mtime" data-task-id="${escapeHtml(task.id)}" ${verifyRunning ? 'disabled' : ''}>${escapeHtml(verifyLabel)}</button>` : ''}
+            ${showMtimeMenu ? mtimeActionMenu(task, verifyLabel, verifyRunning, mtimeVerification) : ''}
             <button type="button" data-tab="settings">编辑</button>
           </div>
         </div>
@@ -324,6 +330,50 @@ async function verifyMtimeMismatches(taskId) {
   show(result.running
     ? '已开始全部校验时间不同文件'
     : `校验 ${result.checked}/${result.totalCandidates}：匹配 ${result.matched}，不一致 ${result.mismatched}，失败 ${result.failed}`);
+}
+
+async function handleMtimeMenu(menu) {
+  const action = menu.value;
+  const taskId = menu.dataset.taskId || '';
+  menu.value = '';
+  if (!action) {
+    return;
+  }
+  if (action === 'verify') {
+    await verifyMtimeMismatches(taskId);
+  } else if (action === 'mismatched' || action === 'failed') {
+    await loadMtimeMismatchDetails(taskId, action);
+  }
+}
+
+function mtimeActionMenu(task, label, running, stats) {
+  const mismatched = Number(stats.mismatched || 0);
+  const failed = Number(stats.failed || 0);
+  return `
+    <select class="task-action-select" data-action="mtime-menu" data-task-id="${escapeHtml(task.id)}" aria-label="时间校验">
+      <option value="">${escapeHtml(label)}</option>
+      <option value="verify" ${running ? 'disabled' : ''}>${running ? '正在校验' : '全部校验时间不同'}</option>
+      <option value="mismatched" ${mismatched > 0 ? '' : 'disabled'}>查看内容不一致${mismatched > 0 ? ` (${formatNumber(mismatched)})` : ''}</option>
+      <option value="failed" ${failed > 0 ? '' : 'disabled'}>查看校验失败${failed > 0 ? ` (${formatNumber(failed)})` : ''}</option>
+    </select>
+  `;
+}
+
+async function loadMtimeMismatchDetails(taskId, status) {
+  const body = await get(`/api/mtime-mismatches?taskId=${encodeURIComponent(taskId)}&status=${encodeURIComponent(status)}`);
+  const title = status === 'mismatched' ? '内容不一致' : '校验失败';
+  setText('mtimeDetailsTitle', title);
+  setText('mtimeDetailsSummary', `${body.total} 个文件${body.total > body.files.length ? `，显示前 ${body.files.length} 个` : ''}`);
+  document.querySelector('#mtimeDetailsRows').innerHTML = body.files.map((file) => `
+    <tr>
+      <td>${escapeHtml(file.relativePath || file.key)}</td>
+      <td>${formatBytes(file.size || 0)}</td>
+      <td>${escapeHtml(mtimeStatusText(file.status))}</td>
+      <td>${escapeHtml(formatDateTime(file.verifiedAt))}</td>
+      <td>${escapeHtml(file.error || file.remotePath || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5">暂无文件</td></tr>';
+  mtimeDetailsDialog.showModal();
 }
 
 function scanModeText(scanMode) {
@@ -563,6 +613,39 @@ function weekdayInputs(selected) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat('zh-CN').format(Number(value || 0));
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024 * 1024) {
+    return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${value} B`;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function mtimeStatusText(status) {
+  return {
+    matched: '已校验',
+    mismatched: '内容不一致',
+    failed: '校验失败'
+  }[status] || status || '';
 }
 
 function renumberTaskEditors() {

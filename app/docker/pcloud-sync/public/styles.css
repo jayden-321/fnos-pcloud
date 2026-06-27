@@ -223,16 +223,29 @@ dt {
 }
 
 .task-card-actions button,
+.task-action-select,
 .task-editor button,
-.folder-dialog button {
+.folder-dialog button,
+.details-dialog button {
   background: #eef4fb;
   color: #2c5f9e;
 }
 
 .task-card-actions button:hover,
+.task-action-select:hover,
 .task-editor button:hover,
-.folder-dialog button:hover {
+.folder-dialog button:hover,
+.details-dialog button:hover {
   background: #ddeafa;
+}
+
+.task-action-select {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 34px 0 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .success {
@@ -503,15 +516,31 @@ dialog::backdrop {
   background: rgb(15 23 42 / 0.34);
 }
 
-.folder-dialog {
+.folder-dialog,
+.details-dialog {
   padding: 16px;
 }
 
-.folder-dialog header {
+.folder-dialog header,
+.details-dialog header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+.details-dialog header p {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.mtime-details-table {
+  max-height: 520px;
+}
+
+.mtime-details-table td:first-child {
+  max-width: 360px;
+  overflow-wrap: anywhere;
 }
 
 .folder-path {
