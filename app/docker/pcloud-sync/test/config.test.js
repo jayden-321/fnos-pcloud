@@ -215,6 +215,18 @@ test('normalizeConfig treats an explicit empty task list as deleted tasks', () =
   assert.deepEqual(config.sources, []);
 });
 
+test('normalizeConfig keeps a valid schedule time zone and rejects unknown ones', () => {
+  const valid = normalizeConfig({ sync: { timezone: 'Asia/Kuala_Lumpur' } });
+  assert.equal(valid.sync.timezone, 'Asia/Kuala_Lumpur');
+
+  const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const invalid = normalizeConfig({ sync: { timezone: 'Not/AZone' } });
+  assert.equal(invalid.sync.timezone, systemTimezone);
+
+  const empty = normalizeConfig({ sync: { timezone: '   ' } });
+  assert.equal(empty.sync.timezone, systemTimezone);
+});
+
 test('redactConfig hides stored secrets but keeps connection shape', () => {
   const redacted = redactConfig(normalizeConfig({
     pcloud: {

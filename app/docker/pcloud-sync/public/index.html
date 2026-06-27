@@ -137,6 +137,11 @@
           <section class="panel">
             <h3>同步规则</h3>
             <label>
+              定时任务时区
+              <input name="timezone" autocomplete="off" placeholder="例如 Asia/Kuala_Lumpur">
+              <small class="field-note">每天/每周定时任务按此时区判断触发时间；默认填入浏览器所在时区，留空则使用容器时区（通常为 UTC）。按间隔运行的任务不受影响。</small>
+            </label>
+            <label>
               并发上传数
               <input name="concurrency" type="number" min="1" max="8">
               <small class="field-note">pCloud 官方文档未声明推荐并发；建议 1-4，最高 8。</small>

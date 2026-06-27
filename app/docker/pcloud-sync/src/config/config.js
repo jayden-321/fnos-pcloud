@@ -11,6 +11,7 @@ const DEFAULT_CONFIG = {
     intervalSeconds: 300,
     concurrency: 2,
     ignorePatterns: ['.DS_Store', 'Thumbs.db', '*.tmp', '*.part', '~$*'],
+    timezone: 'UTC',
     logRetentionDays: 30,
     logRetentionCount: 300,
     renameIfExists: false,
@@ -79,6 +80,7 @@ function normalizeSync(input) {
   return {
     intervalSeconds: clampInteger(input.intervalSeconds, DEFAULT_CONFIG.sync.intervalSeconds, 30, 86400),
     concurrency: clampInteger(input.concurrency, DEFAULT_CONFIG.sync.concurrency, 1, 8),
+    timezone: normalizeTimezone(input.timezone),
     logRetentionDays: clampInteger(input.logRetentionDays, DEFAULT_CONFIG.sync.logRetentionDays, 0, 3650),
     logRetentionCount: clampInteger(input.logRetentionCount, DEFAULT_CONFIG.sync.logRetentionCount, 0, 10000),
     renameIfExists: input.renameIfExists === true,
@@ -87,6 +89,28 @@ function normalizeSync(input) {
     mtimeVerifyConcurrency: clampInteger(input.mtimeVerifyConcurrency, DEFAULT_CONFIG.sync.mtimeVerifyConcurrency, 1, 10),
     ignorePatterns: normalizeIgnorePatterns(input.ignorePatterns ?? DEFAULT_CONFIG.sync.ignorePatterns)
   };
+}
+
+function systemTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_CONFIG.sync.timezone;
+  } catch {
+    return DEFAULT_CONFIG.sync.timezone;
+  }
+}
+
+function normalizeTimezone(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return systemTimezone();
+  }
+  try {
+    // Throws RangeError for an unknown IANA time zone name.
+    new Intl.DateTimeFormat('en-US', { timeZone: raw });
+    return raw;
+  } catch {
+    return systemTimezone();
+  }
 }
 
 function normalizeChecksumMode(value) {
