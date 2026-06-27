@@ -1906,6 +1906,52 @@ test('SyncEngine ignores old dashed state and uploads to the normalized source d
   assert.equal(files[0].pcloudPath, '/NAS/财务/a.txt');
 });
 
+test('SyncEngine fires daily schedules at the configured time zone, not container UTC', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'queued.txt');
+  await writeFile(filePath, 'queued');
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    // Asia/Kuala_Lumpur is UTC+8 with no DST, so 09:30 local == 01:30 UTC.
+    sync: { timezone: 'Asia/Kuala_Lumpur' },
+    tasks: [
+      { id: 'daily', name: 'Daily', localPath: sourceDir, remotePath: '/Sync/daily', schedule: { type: 'daily', time: '09:30' } }
+    ]
+  }));
+  await store.upsertFile({
+    key: 'daily/queued.txt',
+    sourceId: 'daily',
+    absolutePath: filePath,
+    relativePath: 'queued.txt',
+    remotePath: '/Sync/daily/queued.txt',
+    size: 6,
+    status: 'pending'
+  });
+
+  const uploads = [];
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async () => ({ folderid: 42 }),
+      uploadFile: async (payload) => {
+        uploads.push(payload.filename);
+        return { fileids: [42], metadata: [{ fileid: 42, name: payload.filename }] };
+      }
+    })
+  });
+
+  // 09:30 UTC is the WRONG instant for a UTC+8 user: must not fire.
+  assert.equal(await engine.runDueTasks(new Date(Date.UTC(2026, 5, 29, 9, 30, 10))), 0);
+  assert.deepEqual(uploads, []);
+
+  // 01:30 UTC == 09:30 in Asia/Kuala_Lumpur: must fire.
+  assert.equal(await engine.runDueTasks(new Date(Date.UTC(2026, 5, 29, 1, 30, 10))), 1);
+  assert.deepEqual(uploads, ['queued.txt']);
+});
+
 async function waitFor(predicate, timeoutMs = 1000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {

@@ -19,6 +19,7 @@ const fields = {
   clientSecret: form.elements.clientSecret,
   oauthCode: form.elements.oauthCode,
   accessToken: form.elements.accessToken,
+  timezone: form.elements.timezone,
   concurrency: form.elements.concurrency,
   renameIfExists: form.elements.renameIfExists,
   checksumMode: form.elements.checksumMode,
@@ -180,6 +181,7 @@ async function loadConfig() {
   fields.clientId.value = currentConfig.pcloud.clientId || '';
   fields.clientSecret.value = '';
   fields.accessToken.value = currentConfig.pcloud.accessToken ? TOKEN_MASK : '';
+  fields.timezone.value = scheduleTimezoneValue(currentConfig.sync.timezone);
   fields.concurrency.value = currentConfig.sync.concurrency;
   fields.renameIfExists.checked = currentConfig.sync.renameIfExists === true;
   fields.checksumMode.value = currentConfig.sync.checksumMode || 'failed';
@@ -209,6 +211,7 @@ async function saveConfig() {
     pcloud,
     tasks,
     sync: {
+      timezone: fields.timezone.value.trim(),
       concurrency: Number(fields.concurrency.value),
       renameIfExists: fields.renameIfExists.checked,
       checksumMode: fields.checksumMode.value,
@@ -832,6 +835,25 @@ function show(message) {
 function joinRemote(...parts) {
   const joined = parts.join('/').replaceAll('\\', '/').split('/').filter(Boolean).join('/');
   return `/${joined}`;
+}
+
+function browserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
+// Show the saved schedule time zone. When it is still the UTC default (i.e. the
+// user has not chosen one), prefill the browser time zone so saving once makes
+// daily/weekly schedules fire at the expected local time.
+function scheduleTimezoneValue(saved) {
+  const value = String(saved || '').trim();
+  if (value && value !== 'UTC') {
+    return value;
+  }
+  return browserTimezone() || value;
 }
 
 function escapeHtml(value) {

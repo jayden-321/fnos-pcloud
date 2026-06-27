@@ -1430,7 +1430,7 @@ function taskIsDue(task, sync, now, slots) {
     const intervalMs = Number(schedule.intervalSeconds || sync.intervalSeconds || 300) * 1000;
     return !last?.at || now.getTime() - Number(last.at) >= intervalMs;
   }
-  const slot = scheduleSlot(schedule, now);
+  const slot = scheduleSlot(schedule, now, sync.timezone);
   return Boolean(slot) && slots.get(task.id)?.slot !== slot;
 }
 
@@ -1440,7 +1440,7 @@ function rememberTaskScheduleSlot(slots, task, sync, now) {
     return;
   }
   slots.set(task.id, {
-    slot: schedule.type === 'interval' ? `interval:${Math.floor(now.getTime() / 1000)}` : scheduleSlot(schedule, now),
+    slot: schedule.type === 'interval' ? `interval:${Math.floor(now.getTime() / 1000)}` : scheduleSlot(schedule, now, sync.timezone),
     at: now.getTime()
   });
 }
@@ -1459,31 +1459,54 @@ function effectiveSchedule(task, sync) {
   };
 }
 
-function scheduleSlot(schedule, now) {
+function scheduleSlot(schedule, now, timeZone) {
+  const parts = zonedScheduleParts(now, timeZone);
   const time = String(schedule.time || '').trim();
-  if (!timeMatches(time, now)) {
+  if (time !== `${parts.hour}:${parts.minute}`) {
     return '';
   }
   if (schedule.type === 'weekly') {
     const weekdays = Array.isArray(schedule.weekdays) ? schedule.weekdays : [];
-    if (!weekdays.includes(now.getDay())) {
+    if (!weekdays.includes(parts.weekday)) {
       return '';
     }
   }
-  return `${schedule.type}:${dateKey(now)}:${time}`;
+  return `${schedule.type}:${parts.dateKey}:${time}`;
 }
 
-function timeMatches(time, now) {
-  const hour = String(now.getHours()).padStart(2, '0');
-  const minute = String(now.getMinutes()).padStart(2, '0');
-  return time === `${hour}:${minute}`;
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+// Resolve the wall-clock hour/minute/weekday/date for `now` in the configured
+// time zone. Uses Intl (bundled ICU) so named zones work without the OS tzdata
+// package, which the node:alpine base image does not ship.
+function zonedScheduleParts(now, timeZone) {
+  const map = {};
+  for (const part of formatScheduleParts(now, timeZone)) {
+    map[part.type] = part.value;
+  }
+  return {
+    hour: map.hour === '24' ? '00' : map.hour,
+    minute: map.minute,
+    weekday: WEEKDAY_INDEX[map.weekday] ?? now.getDay(),
+    dateKey: `${map.year}-${map.month}-${map.day}`
+  };
 }
 
-function dateKey(now) {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function formatScheduleParts(now, timeZone) {
+  const options = {
+    hourCycle: 'h23',
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  };
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: timeZone || 'UTC', ...options }).formatToParts(now);
+  } catch {
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', ...options }).formatToParts(now);
+  }
 }
 
 function remoteFolderForFile(_config, file) {
