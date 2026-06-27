@@ -1459,6 +1459,50 @@ test('SyncEngine skips files already present in the remote directory', async () 
   assert.equal((await store.stats()).synced, 0);
 });
 
+test('SyncEngine adopts same-size remote files with different mtimes and records diagnostics', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'a.txt');
+  await writeFile(filePath, 'hello');
+  const info = await stat(filePath);
+  const remoteMtimeMs = Math.trunc(info.mtimeMs) - 60000;
+  let uploads = 0;
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      listRemoteFiles: async () => new Map([
+        ['a.txt', { relativePath: 'a.txt', size: 5, mtimeMs: remoteMtimeMs, fileid: 220 }]
+      ]),
+      ensureFolder: async () => ({ folderid: 42 }),
+      uploadFile: async () => {
+        uploads += 1;
+        return { fileids: [220] };
+      }
+    })
+  });
+
+  const result = await engine.scanNow({ forceRemoteScan: true });
+  const files = await store.listFiles();
+  const remoteState = await store.getTaskRemoteState('docs');
+
+  assert.equal(result.queued, 0);
+  assert.equal(result.existing, 1);
+  assert.equal(uploads, 0);
+  assert.equal(result.taskResults[0].mtimeMismatches, 1);
+  assert.equal(remoteState.lastMtimeMismatches, 1);
+  assert.equal(files[0].status, 'existing');
+  assert.equal(files[0].pcloudMtimeMs, remoteMtimeMs);
+  assert.equal(files[0].pcloudFileId, 220);
+});
+
 test('SyncEngine clears stale file state before rebuilding a scan from current tasks', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));

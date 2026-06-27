@@ -311,12 +311,16 @@ function scanDetailText(queue, remoteState) {
   const localMs = queue?.localScanMs ?? remoteState?.lastLocalScanMs;
   const remoteMs = queue?.remoteScanMs ?? remoteState?.lastRemoteScanMs;
   const diffMs = queue?.diffScanMs ?? remoteState?.lastDiffScanMs;
+  const mtimeMismatches = queue?.mtimeMismatches ?? remoteState?.lastMtimeMismatches;
   const parts = [];
   if (Number.isFinite(Number(discovered))) {
     parts.push(`本地 ${formatNumber(discovered)}`);
   }
   if (Number.isFinite(Number(remoteFiles))) {
     parts.push(`远端 ${formatNumber(remoteFiles)}`);
+  }
+  if (Number.isFinite(Number(mtimeMismatches)) && Number(mtimeMismatches) > 0) {
+    parts.push(`时间不同 ${formatNumber(mtimeMismatches)}`);
   }
   if (Number.isFinite(Number(localMs))) {
     parts.push(`本地扫描 ${formatDuration(localMs)}`);

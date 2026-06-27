@@ -57,7 +57,7 @@ function sameRemoteFile(local, remote, previous = null) {
     return true;
   }
   if (!previous) {
-    return false;
+    return true;
   }
   const previousMtime = Number(previous.mtimeMs || 0);
   if (!Number.isFinite(previousMtime) || previousMtime <= 0) {

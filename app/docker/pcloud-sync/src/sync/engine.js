@@ -388,6 +388,7 @@ export class SyncEngine {
         const existingCount = remoteFiles
           ? plan.unchanged.length
           : plan.unchanged.filter((file) => known.get(file.key)?.status === 'existing').length;
+        const mtimeMismatches = remoteFiles ? countRemoteMtimeMismatches(plan.unchanged) : 0;
         result.discovered += discovered.length;
         result.queued += plan.pending.length;
         result.existing += existingCount;
@@ -398,6 +399,7 @@ export class SyncEngine {
           remoteFiles: remoteFiles?.size ?? 0,
           queued: plan.pending.length,
           existing: existingCount,
+          mtimeMismatches,
           scanMode,
           localScanMs,
           remoteScanMs,
@@ -431,6 +433,7 @@ export class SyncEngine {
           lastFullRemoteScanAt: remoteFiles ? new Date().toISOString() : previousRemoteState.lastFullRemoteScanAt,
           lastDiscovered: discovered.length,
           lastRemoteFiles: remoteFiles?.size ?? 0,
+          lastMtimeMismatches: mtimeMismatches,
           lastLocalScanMs: localScanMs,
           lastRemoteScanMs: remoteScanMs,
           lastDiffScanMs: diffScanMs
@@ -1041,6 +1044,20 @@ function knownFilesForTask(known, taskId) {
     .map(([, file]) => file);
 }
 
+function countRemoteMtimeMismatches(files) {
+  return files.filter((file) => remoteMtimeDiffers(file)).length;
+}
+
+function remoteMtimeDiffers(file) {
+  const localMtime = Number(file.mtimeMs || 0);
+  const remoteMtime = Number(file.remote?.mtimeMs || 0);
+  return Number.isFinite(localMtime)
+    && Number.isFinite(remoteMtime)
+    && localMtime > 0
+    && remoteMtime > 0
+    && Math.abs(localMtime - remoteMtime) > 2000;
+}
+
 function cachedUnchangedFile(source, file, existing, remoteListed) {
   if (remoteListed) {
     return {
@@ -1052,6 +1069,8 @@ function cachedUnchangedFile(source, file, existing, remoteListed) {
       pcloudFolderId: file.remote?.parentfolderid ?? existing.pcloudFolderId ?? null,
       pcloudPath: joinRemote(source.remotePath, file.relativePath),
       pcloudHash: file.remote?.hash ?? existing.pcloudHash ?? '',
+      pcloudMtimeMs: file.remote?.mtimeMs ?? existing.pcloudMtimeMs ?? 0,
+      mtimeMismatch: remoteMtimeDiffers(file),
       existingAt: new Date().toISOString()
     };
   }
