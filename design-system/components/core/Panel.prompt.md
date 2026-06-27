@@ -1,11 +1,11 @@
 Flat white content container — fill + 1px border, no shadow. Wraps tables, settings groups, and empty states. Optional `title` and right-aligned `action`.
 
 ```jsx
-<Panel title="Queue Status">
+<Panel title="队列状态">
   <table>…</table>
 </Panel>
 
-<Panel title="Task Configuration" action={<Button variant="soft">Add Task</Button>}>
+<Panel title="任务配置" action={<Button variant="soft">新增任务</Button>}>
   …
 </Panel>
 ```

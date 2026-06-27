@@ -22,23 +22,23 @@
     return (
       <div>
         <div className="grp"><span className="lab">primary</span>
-          <Button>Scan Now</Button>
-          <Button variant="primary" disabled>Stop Sync</Button>
+          <Button>立即扫描</Button>
+          <Button variant="primary" disabled>停止同步</Button>
         </div>
         <div className="grp"><span className="lab">soft</span>
-          <Button variant="soft">View Logs</Button>
-          <Button variant="soft">Edit</Button>
-          <Button variant="link">+ Create New Task</Button>
+          <Button variant="soft">查看日志</Button>
+          <Button variant="soft">编辑</Button>
+          <Button variant="link">＋ 创建新任务</Button>
         </div>
         <div className="grp"><span className="lab">nav</span>
-          <div style={{width:150}}><NavItem active>Sync Tasks</NavItem></div>
-          <div style={{width:150}}><NavItem>Settings</NavItem></div>
+          <div style={{width:150}}><NavItem active>同步任务</NavItem></div>
+          <div style={{width:150}}><NavItem>设置</NavItem></div>
         </div>
         <div className="grp"><span className="lab">status</span>
           <StatusPill status="success" />
           <StatusPill status="failed" />
           <StatusPill status="uploading" />
-          <StatusPill status="queued">Pending upload</StatusPill>
+          <StatusPill status="queued">待上传</StatusPill>
         </div>
       </div>
     );

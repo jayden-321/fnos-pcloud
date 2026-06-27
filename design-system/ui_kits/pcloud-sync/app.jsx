@@ -14,15 +14,15 @@ function App() {
 
   return (
     <>
-      <Sidebar tab={tab} onTab={setTab} onCreate={() => { setTab('settings'); showToast('Added a blank task'); }} />
+      <Sidebar tab={tab} onTab={setTab} onCreate={() => { setTab('settings'); showToast('已新增空白任务'); }} />
       <main className="workspace">
         {tab === 'tasks' && (
           <TasksScreen
             data={data}
-            onScan={() => showToast('Scan started')}
-            onForce={() => showToast('Remote comparison started')}
-            onStop={() => showToast('Stopping sync')}
-            onRetry={() => showToast('3 queued, 0 failed')}
+            onScan={() => showToast('扫描已触发')}
+            onForce={() => showToast('远端重新比对已触发')}
+            onStop={() => showToast('正在停止同步')}
+            onRetry={() => showToast('3 个已入队，0 个失败')}
             onLogs={() => setTab('logs')}
             onEdit={() => setTab('settings')}
           />
