@@ -1,0 +1,42 @@
+<!-- @dsCard group="Components" viewport="700x300" name="Forms & metrics" subtitle="Fields, inputs, selects, metric tiles" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { margin: 0; font-family: var(--font-ui); color: var(--text); background: var(--panel); padding: 22px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel" data-presets="react">
+  const { Field, Input, Select, MetricCard } = window.PCloudNASSyncDesignSystem_4c073a;
+  function Demo() {
+    return (
+      <div>
+        <div className="cols">
+          <Field label="任务名称"><Input placeholder="例如 财务备份" /></Field>
+          <Field label="上传后校验" note="校验会调用 pCloud checksumfile。">
+            <Select><option>不校验</option><option>失败后校验</option><option>全部校验</option></Select>
+          </Field>
+        </div>
+        <div className="metrics">
+          <MetricCard value="1,284" label="总文件" />
+          <MetricCard value="248" label="已成功" tone="success" />
+          <MetricCard value="3" label="失败" tone="danger" />
+          <MetricCard value="1.2 MB/s" label="上传速度" tone="accent" />
+        </div>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>

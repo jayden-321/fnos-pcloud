@@ -1,0 +1,44 @@
+<!-- @dsCard group="Components" viewport="760x240" name="Task card" subtitle="Sync-task row with status, stats & actions" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { margin: 0; font-family: var(--font-ui); color: var(--text); background: var(--bg); padding: 22px; }
+  .stack { display: grid; gap: 14px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+<script src="../../_ds_bundle.js"></script>
+<script type="text/babel" data-presets="react">
+  const { TaskCard } = window.PCloudNASSyncDesignSystem_4c073a;
+  function Demo() {
+    return (
+      <div className="stack">
+        <TaskCard
+          name="财务备份"
+          status="success"
+          statusLabel="同步完成"
+          scanMode="远端增量"
+          scanDetail="本地 1,284 · 远端 1,266 · 本地扫描 0.4s"
+          stats={{ total: 1284, existing: 1266, synced: 18, pending: 0, failed: 0 }}
+        />
+        <TaskCard
+          name="照片归档"
+          status="uploading"
+          statusLabel="同步中"
+          scanMode="远端全量比对"
+          stats={{ total: 8420, existing: 8100, synced: 96, pending: 224, failed: 0 }}
+        />
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>
