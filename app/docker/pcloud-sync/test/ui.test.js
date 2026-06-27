@@ -43,12 +43,15 @@ test('settings exposes official pCloud upload and checksum options', async () =>
   assert.match(html, /name="renameIfExists"/);
   assert.match(html, /name="checksumMode"/);
   assert.match(html, /name="checksumSamplePercent"/);
+  assert.match(html, /name="mtimeVerifyConcurrency"/);
   assert.match(html, /失败后校验/);
   assert.match(html, /抽样校验/);
   assert.match(html, /全部校验/);
+  assert.match(html, /时间不同校验并发数/);
   assert.match(script, /renameIfExists/);
   assert.match(script, /checksumMode/);
   assert.match(script, /checksumSamplePercent/);
+  assert.match(script, /mtimeVerifyConcurrency/);
 });
 
 test('sync logs expose file size, progress, and uploading status filters', async () => {
@@ -117,8 +120,11 @@ test('task cards show scan source labels from engine queue state', async () => {
   assert.match(script, /本地扫描/);
   assert.match(script, /远端列举/);
   assert.match(script, /时间不同/);
+  assert.match(script, /时间不同已校验/);
+  assert.match(script, /内容不一致/);
   assert.match(script, /verify-mtime/);
-  assert.match(script, /verifyMtimeMismatchSample/);
+  assert.match(script, /verifyMtimeMismatches/);
+  assert.match(script, /\/api\/verify-mtime-mismatches/);
 });
 
 test('task schedule form hides fields that do not apply to the selected schedule type', async () => {

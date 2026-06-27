@@ -74,6 +74,7 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
         id: task.id,
         name: task.name,
         stats: await store.stats({ sourceId: task.id }),
+        mtimeVerification: await mtimeVerificationStats(store, task.id),
         remoteState: remoteStates.get(task.id) ?? null
       }))),
       stats: await store.stats(),
@@ -160,12 +161,27 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
 
   if (request.method === 'POST' && url.pathname === '/api/verify-mtime-mismatch-sample') {
     const body = await readJsonBody(request);
+    if (engine.startMtimeMismatchVerification) {
+      return json(await engine.startMtimeMismatchVerification({
+        taskId: String(body.taskId || '').trim()
+      }));
+    }
     if (!engine.verifyMtimeMismatchSample) {
       return json({ error: 'Mtime mismatch sample verification is unavailable' }, 501);
     }
     return json(await engine.verifyMtimeMismatchSample({
       taskId: String(body.taskId || '').trim(),
       limit: Number(body.limit || 20)
+    }));
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/verify-mtime-mismatches') {
+    const body = await readJsonBody(request);
+    if (!engine.startMtimeMismatchVerification) {
+      return json({ error: 'Mtime mismatch verification is unavailable' }, 501);
+    }
+    return json(await engine.startMtimeMismatchVerification({
+      taskId: String(body.taskId || '').trim()
     }));
   }
 
@@ -265,6 +281,36 @@ async function readJsonBody(request) {
 
 function json(body, status = 200) {
   return Response.json(body, { status });
+}
+
+async function mtimeVerificationStats(store, taskId) {
+  const files = await store.listFiles({ sourceId: taskId, status: 'existing' });
+  const stats = {
+    total: 0,
+    verified: 0,
+    matched: 0,
+    mismatched: 0,
+    failed: 0,
+    pending: 0
+  };
+  for (const file of files) {
+    if (file.mtimeMismatch !== true) {
+      continue;
+    }
+    stats.total += 1;
+    if (file.mtimeMismatchStatus === 'matched') {
+      stats.verified += 1;
+      stats.matched += 1;
+    } else if (file.mtimeMismatchStatus === 'mismatched') {
+      stats.verified += 1;
+      stats.mismatched += 1;
+    } else if (file.mtimeMismatchStatus === 'failed') {
+      stats.failed += 1;
+    } else {
+      stats.pending += 1;
+    }
+  }
+  return stats;
 }
 
 function contentType(filePath) {

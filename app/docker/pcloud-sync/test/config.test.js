@@ -65,25 +65,29 @@ test('normalizeConfig keeps official upload conflict and checksum options', () =
     sync: {
       renameIfExists: true,
       checksumMode: 'sample',
-      checksumSamplePercent: 25
+      checksumSamplePercent: 25,
+      mtimeVerifyConcurrency: 7
     }
   });
 
   assert.equal(config.sync.renameIfExists, true);
   assert.equal(config.sync.checksumMode, 'sample');
   assert.equal(config.sync.checksumSamplePercent, 25);
+  assert.equal(config.sync.mtimeVerifyConcurrency, 7);
 
   const fallback = normalizeConfig({
     sync: {
       renameIfExists: false,
       checksumMode: 'invalid',
-      checksumSamplePercent: 500
+      checksumSamplePercent: 500,
+      mtimeVerifyConcurrency: 99
     }
   });
 
   assert.equal(fallback.sync.renameIfExists, false);
   assert.equal(fallback.sync.checksumMode, 'failed');
   assert.equal(fallback.sync.checksumSamplePercent, 100);
+  assert.equal(fallback.sync.mtimeVerifyConcurrency, 10);
 });
 
 test('normalizeConfig preserves non-ASCII source names for remote folders', () => {

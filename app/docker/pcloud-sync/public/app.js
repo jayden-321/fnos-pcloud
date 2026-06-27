@@ -22,6 +22,7 @@ const fields = {
   renameIfExists: form.elements.renameIfExists,
   checksumMode: form.elements.checksumMode,
   checksumSamplePercent: form.elements.checksumSamplePercent,
+  mtimeVerifyConcurrency: form.elements.mtimeVerifyConcurrency,
   logRetentionDays: form.elements.logRetentionDays,
   logRetentionCount: form.elements.logRetentionCount,
   ignorePatterns: form.elements.ignorePatterns
@@ -49,7 +50,7 @@ document.body.addEventListener('click', (event) => {
   }
   const actionButton = event.target.closest('button[data-action="verify-mtime"]');
   if (actionButton) {
-    verifyMtimeMismatchSample(actionButton.dataset.taskId);
+    verifyMtimeMismatches(actionButton.dataset.taskId);
   }
 });
 
@@ -171,6 +172,7 @@ async function loadConfig() {
   fields.renameIfExists.checked = currentConfig.sync.renameIfExists === true;
   fields.checksumMode.value = currentConfig.sync.checksumMode || 'failed';
   fields.checksumSamplePercent.value = currentConfig.sync.checksumSamplePercent ?? 5;
+  fields.mtimeVerifyConcurrency.value = currentConfig.sync.mtimeVerifyConcurrency ?? 3;
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
   fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
   fields.ignorePatterns.value = currentConfig.sync.ignorePatterns.join('\n');
@@ -199,6 +201,7 @@ async function saveConfig() {
       renameIfExists: fields.renameIfExists.checked,
       checksumMode: fields.checksumMode.value,
       checksumSamplePercent: Number(fields.checksumSamplePercent.value),
+      mtimeVerifyConcurrency: Number(fields.mtimeVerifyConcurrency.value),
       logRetentionDays: Number(fields.logRetentionDays.value),
       logRetentionCount: Number(fields.logRetentionCount.value),
       ignorePatterns: fields.ignorePatterns.value
@@ -261,6 +264,13 @@ function renderTaskCards() {
     const status = taskStatusText({ queue, stats, counts });
     const scanMode = scanModeText(queue?.scanMode || taskStats.remoteState?.lastScanMode);
     const scanDetails = scanDetailText(queue, taskStats.remoteState);
+    const mtimeVerification = taskStats.mtimeVerification || {};
+    const verificationJob = (currentStatus?.engine?.mtimeVerifications || []).find((job) => (job.taskId || '') === task.id);
+    const verifyRunning = verificationJob?.running === true;
+    const verifyLabel = verifyRunning
+      ? `校验中 ${formatNumber(verificationJob.checked || 0)}/${formatNumber(verificationJob.totalCandidates || 0)}`
+      : '全部校验';
+    const verifySummary = mtimeVerificationText(mtimeVerification, verificationJob);
     const mtimeMismatches = Number(queue?.mtimeMismatches ?? taskStats.remoteState?.lastMtimeMismatches ?? 0);
     return `
       <article class="task-card">
@@ -270,6 +280,7 @@ function renderTaskCards() {
             <p class="${counts.failed > 0 ? 'danger' : 'success'}">${escapeHtml(status)}</p>
             ${scanMode ? `<p class="task-scan-mode">扫描依据：${escapeHtml(scanMode)}</p>` : ''}
             ${scanDetails ? `<p class="task-scan-detail">${escapeHtml(scanDetails)}</p>` : ''}
+            ${verifySummary ? `<p class="task-scan-detail">${escapeHtml(verifySummary)}</p>` : ''}
             <div class="task-stat-grid">
               <span>总 ${formatNumber(stats.total)}</span>
               <span>已存在 ${formatNumber(stats.existing || 0)}</span>
@@ -280,7 +291,7 @@ function renderTaskCards() {
           </div>
           <div class="task-card-actions">
             <button type="button" data-tab="logs">查看日志</button>
-            ${mtimeMismatches > 0 ? `<button type="button" data-action="verify-mtime" data-task-id="${escapeHtml(task.id)}">抽样校验</button>` : ''}
+            ${mtimeMismatches > 0 ? `<button type="button" data-action="verify-mtime" data-task-id="${escapeHtml(task.id)}" ${verifyRunning ? 'disabled' : ''}>${escapeHtml(verifyLabel)}</button>` : ''}
             <button type="button" data-tab="settings">编辑</button>
           </div>
         </div>
@@ -303,14 +314,16 @@ async function runScan({ forceRemoteScan = false } = {}) {
     : forceRemoteScan ? '远端重新比对已触发' : '扫描已触发');
 }
 
-async function verifyMtimeMismatchSample(taskId) {
-  const result = await post('/api/verify-mtime-mismatch-sample', { taskId, limit: 20 });
+async function verifyMtimeMismatches(taskId) {
+  const result = await post('/api/verify-mtime-mismatches', { taskId });
   await refreshStatus();
   if (result.skipped) {
-    show(result.reason || '抽样校验不可用');
+    show(result.reason || '时间不同校验不可用');
     return;
   }
-  show(`抽样 ${result.checked}/${result.totalCandidates}：匹配 ${result.matched}，不一致 ${result.mismatched}，失败 ${result.failed}`);
+  show(result.running
+    ? '已开始全部校验时间不同文件'
+    : `校验 ${result.checked}/${result.totalCandidates}：匹配 ${result.matched}，不一致 ${result.mismatched}，失败 ${result.failed}`);
 }
 
 function scanModeText(scanMode) {
@@ -346,6 +359,23 @@ function scanDetailText(queue, remoteState) {
   }
   if (Number.isFinite(Number(diffMs)) && Number(diffMs) > 0) {
     parts.push(`远端增量 ${formatDuration(diffMs)}`);
+  }
+  return parts.join(' · ');
+}
+
+function mtimeVerificationText(stats = {}, job = null) {
+  const parts = [];
+  if (job?.running) {
+    parts.push(`时间校验中 ${formatNumber(job.checked || 0)}/${formatNumber(job.totalCandidates || 0)}`);
+  }
+  if (Number(stats.matched || 0) > 0) {
+    parts.push(`时间不同已校验 ${formatNumber(stats.matched)}`);
+  }
+  if (Number(stats.mismatched || 0) > 0) {
+    parts.push(`内容不一致 ${formatNumber(stats.mismatched)}`);
+  }
+  if (Number(stats.failed || 0) > 0) {
+    parts.push(`校验失败 ${formatNumber(stats.failed)}`);
   }
   return parts.join(' · ');
 }

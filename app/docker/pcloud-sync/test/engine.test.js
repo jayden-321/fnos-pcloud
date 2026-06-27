@@ -1567,6 +1567,68 @@ test('SyncEngine samples checksum verification for mtime-mismatched existing fil
   assert.equal(files.find((file) => file.key === 'docs/a.txt').checksumVerifiedAt, result.results[0].verifiedAt);
 });
 
+test('SyncEngine verifies all mtime-mismatched files with bounded concurrency', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const names = ['a.txt', 'b.txt', 'c.txt', 'd.txt'];
+  const calls = [];
+  let active = 0;
+  let maxActive = 0;
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    sync: { mtimeVerifyConcurrency: 2 },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+
+  for (const [index, name] of names.entries()) {
+    const filePath = path.join(sourceDir, name);
+    await writeFile(filePath, 'hello');
+    const info = await stat(filePath);
+    await store.upsertFile({
+      key: `docs/${name}`,
+      sourceId: 'docs',
+      absolutePath: filePath,
+      relativePath: name,
+      remotePath: `/Sync/docs/${name}`,
+      pcloudFileId: 200 + index,
+      size: 5,
+      mtimeMs: Math.trunc(info.mtimeMs),
+      status: 'existing',
+      mtimeMismatch: true
+    });
+  }
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      checksumFile: async ({ fileid }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        calls.push(fileid);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { sha1: 'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d' };
+      }
+    })
+  });
+
+  const result = await engine.verifyMtimeMismatches({ taskId: 'docs' });
+  const files = await store.listFiles({ sourceId: 'docs' });
+
+  assert.deepEqual(calls.sort((a, b) => a - b), [200, 201, 202, 203]);
+  assert.equal(maxActive, 2);
+  assert.equal(result.totalCandidates, 4);
+  assert.equal(result.checked, 4);
+  assert.equal(result.matched, 4);
+  assert.equal(result.mismatched, 0);
+  assert.equal(result.failed, 0);
+  assert.equal(files.every((file) => file.mtimeMismatchVerified === true), true);
+  assert.equal(files.every((file) => file.mtimeMismatchStatus === 'matched'), true);
+});
+
 test('SyncEngine clears stale file state before rebuilding a scan from current tasks', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));

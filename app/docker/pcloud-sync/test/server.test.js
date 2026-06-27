@@ -133,7 +133,7 @@ test('HTTP API passes force remote scan requests to manual scans', async () => {
   assert.deepEqual(scanOptions, { taskIds: [], trigger: 'manual', forceRemoteScan: true });
 });
 
-test('HTTP API verifies a sample of mtime-mismatched files', async () => {
+test('HTTP API starts full mtime-mismatch verification', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-mtime-sample-'));
   const store = new SqliteStore(dir);
   await store.init();
@@ -142,20 +142,20 @@ test('HTTP API verifies a sample of mtime-mismatched files', async () => {
   const app = createApp({
     store,
     engine: {
-      verifyMtimeMismatchSample: async (options) => {
+      startMtimeMismatchVerification: async (options) => {
         verifyOptions = options;
-        return { totalCandidates: 9, checked: 3, matched: 3, mismatched: 0, failed: 0, results: [] };
+        return { running: true, totalCandidates: 9, checked: 0, matched: 0, mismatched: 0, failed: 0 };
       }
     }
   });
-  const response = await app.fetch(new Request('http://local/api/verify-mtime-mismatch-sample', {
+  const response = await app.fetch(new Request('http://local/api/verify-mtime-mismatches', {
     method: 'POST',
-    body: JSON.stringify({ taskId: 'docs', limit: 3 })
+    body: JSON.stringify({ taskId: 'docs' })
   }));
 
   assert.equal(response.status, 200);
-  assert.deepEqual(verifyOptions, { taskId: 'docs', limit: 3 });
-  assert.equal((await response.json()).checked, 3);
+  assert.deepEqual(verifyOptions, { taskId: 'docs' });
+  assert.equal((await response.json()).running, true);
 });
 
 test('HTTP API drains the pending queue after retrying failed or stuck files', async () => {

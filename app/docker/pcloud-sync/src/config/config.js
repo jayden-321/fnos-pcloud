@@ -15,7 +15,8 @@ const DEFAULT_CONFIG = {
     logRetentionCount: 300,
     renameIfExists: false,
     checksumMode: 'failed',
-    checksumSamplePercent: 5
+    checksumSamplePercent: 5,
+    mtimeVerifyConcurrency: 3
   },
   tasks: [],
   sources: []
@@ -83,6 +84,7 @@ function normalizeSync(input) {
     renameIfExists: input.renameIfExists === true,
     checksumMode: normalizeChecksumMode(input.checksumMode),
     checksumSamplePercent: clampInteger(input.checksumSamplePercent, DEFAULT_CONFIG.sync.checksumSamplePercent, 0, 100),
+    mtimeVerifyConcurrency: clampInteger(input.mtimeVerifyConcurrency, DEFAULT_CONFIG.sync.mtimeVerifyConcurrency, 1, 10),
     ignorePatterns: normalizeIgnorePatterns(input.ignorePatterns ?? DEFAULT_CONFIG.sync.ignorePatterns)
   };
 }

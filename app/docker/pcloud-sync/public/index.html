@@ -160,6 +160,11 @@
               <input name="checksumSamplePercent" type="number" min="0" max="100" step="1">
               <small class="field-note">仅“抽样校验”使用。</small>
             </label>
+            <label>
+              时间不同校验并发数
+              <input name="mtimeVerifyConcurrency" type="number" min="1" max="10" step="1">
+              <small class="field-note">用于“全部校验时间不同文件”；默认 3，文件很多时可提高，过高可能触发 pCloud 限流。</small>
+            </label>
             <div class="two">
               <label>
                 日志保存天数

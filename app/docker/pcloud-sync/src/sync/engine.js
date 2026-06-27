@@ -27,6 +27,7 @@ export class SyncEngine {
     this.watchers = new Map();
     this.changedFiles = new Map();
     this.changedTasks = new Set();
+    this.mtimeVerificationJobs = new Map();
   }
 
   getStatus() {
@@ -52,7 +53,8 @@ export class SyncEngine {
         bytes: upload.bytes,
         total: upload.total,
         updatedAt: upload.updatedAt
-      }))
+      })),
+      mtimeVerifications: [...this.mtimeVerificationJobs.values()].map((job) => structuredClone(job))
     };
   }
 
@@ -847,9 +849,64 @@ export class SyncEngine {
   }
 
   async verifyMtimeMismatchSample({ taskId = '', limit = 20 } = {}) {
+    return this.verifyMtimeMismatches({ taskId, limit, concurrency: 1 });
+  }
+
+  async startMtimeMismatchVerification({ taskId = '' } = {}) {
+    const normalizedTaskId = String(taskId || '').trim();
+    const jobKey = normalizedTaskId || 'all';
+    const existing = this.mtimeVerificationJobs.get(jobKey);
+    if (existing?.running) {
+      return structuredClone(existing);
+    }
+
+    const job = {
+      running: true,
+      taskId: normalizedTaskId,
+      totalCandidates: 0,
+      checked: 0,
+      matched: 0,
+      mismatched: 0,
+      failed: 0,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: ''
+    };
+    this.mtimeVerificationJobs.set(jobKey, job);
+
+    this.verifyMtimeMismatches({
+      taskId: normalizedTaskId,
+      onProgress: (progress) => {
+        Object.assign(job, progress, {
+          running: true,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }).then((summary) => {
+      Object.assign(job, summary, {
+        running: false,
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        error: ''
+      });
+    }).catch((error) => {
+      Object.assign(job, {
+        running: false,
+        finishedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        error: error.message
+      });
+      this.lastError = error.message;
+    });
+
+    return structuredClone(job);
+  }
+
+  async verifyMtimeMismatches({ taskId = '', limit = 0, concurrency = 0, onProgress = null } = {}) {
     const config = normalizeConfig(await this.store.loadConfig() ?? {});
     const normalizedTaskId = String(taskId || '').trim();
-    const sampleLimit = Math.max(1, Math.min(100, Number(limit || 20)));
+    const maxItems = Math.max(0, Number(limit || 0));
+    const workerCount = Math.max(1, Math.min(10, Number(concurrency || config.sync.mtimeVerifyConcurrency || 3)));
     const client = config.pcloud.accessToken ? this.pcloudFactory(config) : null;
     if (!client?.checksumFile) {
       return { skipped: true, reason: 'pCloud checksumfile unavailable', totalCandidates: 0, checked: 0, matched: 0, mismatched: 0, failed: 0, results: [] };
@@ -861,21 +918,25 @@ export class SyncEngine {
     }
     const candidates = (await this.store.listFiles(filter))
       .filter((file) => file.mtimeMismatch === true)
+      .filter((file) => file.mtimeMismatchStatus !== 'matched')
       .filter((file) => file.absolutePath && (file.pcloudFileId || file.pcloudPath || file.remotePath))
       .sort((a, b) => String(a.key).localeCompare(String(b.key)));
-    const sample = candidates.slice(0, sampleLimit);
+    const selected = maxItems > 0 ? candidates.slice(0, maxItems) : candidates;
     const summary = {
       skipped: false,
       taskId: normalizedTaskId,
       totalCandidates: candidates.length,
+      selected: selected.length,
+      concurrency: workerCount,
       checked: 0,
       matched: 0,
       mismatched: 0,
       failed: 0,
       results: []
     };
+    onProgress?.(summary);
 
-    for (const file of sample) {
+    await runLimited(selected, workerCount, async (file) => {
       const target = {
         fileid: file.pcloudFileId,
         path: file.pcloudFileId ? '' : file.pcloudPath || file.remotePath
@@ -891,22 +952,32 @@ export class SyncEngine {
         await this.store.setStatus(file.key, file.status, {
           checksumSha1: result.sha1,
           checksumVerifiedAt: result.verifiedAt,
-          checksumSampleStatus: 'matched'
+          checksumSampleStatus: 'matched',
+          mtimeMismatchVerified: true,
+          mtimeMismatchVerifiedAt: result.verifiedAt,
+          mtimeMismatchStatus: 'matched',
+          mtimeMismatchError: ''
         });
         summary.checked += 1;
         summary.matched += 1;
-        summary.results.push(result);
+        pushLimited(summary.results, result);
       } catch (error) {
         const isMismatch = /checksum verification failed/i.test(error.message || '');
+        const verifiedAt = new Date().toISOString();
         const result = {
           key: file.key,
           status: isMismatch ? 'mismatched' : 'failed',
-          error: error.message
+          error: error.message,
+          verifiedAt
         };
         await this.store.setStatus(file.key, file.status, {
           checksumSampleStatus: result.status,
           checksumSampleError: error.message,
-          checksumVerifiedAt: new Date().toISOString()
+          checksumVerifiedAt: verifiedAt,
+          mtimeMismatchVerified: isMismatch,
+          mtimeMismatchVerifiedAt: isMismatch ? verifiedAt : '',
+          mtimeMismatchStatus: result.status,
+          mtimeMismatchError: error.message
         });
         summary.checked += 1;
         if (isMismatch) {
@@ -914,11 +985,12 @@ export class SyncEngine {
         } else {
           summary.failed += 1;
         }
-        summary.results.push(result);
+        pushLimited(summary.results, result);
       }
-    }
+      onProgress?.(summary);
+    });
 
-    await this.store.addEvent('mtime_sample_verified', normalizedTaskId || 'all', `${summary.checked}/${summary.totalCandidates} checked, ${summary.matched} matched, ${summary.mismatched} mismatched, ${summary.failed} failed`);
+    await this.store.addEvent('mtime_mismatch_verified', normalizedTaskId || 'all', `${summary.checked}/${summary.totalCandidates} checked, ${summary.matched} matched, ${summary.mismatched} mismatched, ${summary.failed} failed`);
     return summary;
   }
 
@@ -1309,6 +1381,12 @@ function shouldVerifySuccessfulUpload(file, sync) {
 function stablePercent(value) {
   const hash = createHash('sha1').update(String(value || '')).digest();
   return hash[0] % 100;
+}
+
+function pushLimited(items, item, limit = 100) {
+  if (items.length < limit) {
+    items.push(item);
+  }
 }
 
 async function sha1File(filePath) {
