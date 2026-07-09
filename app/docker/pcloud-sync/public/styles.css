@@ -226,7 +226,9 @@ dt {
 .task-action-select,
 .task-editor button,
 .folder-dialog button,
-.details-dialog button {
+.details-dialog button,
+.decrypt-table button,
+.button-link {
   background: #eef4fb;
   color: #2c5f9e;
 }
@@ -235,7 +237,9 @@ dt {
 .task-action-select:hover,
 .task-editor button:hover,
 .folder-dialog button:hover,
-.details-dialog button:hover {
+.details-dialog button:hover,
+.decrypt-table button:hover,
+.button-link:hover {
   background: #ddeafa;
 }
 
@@ -507,6 +511,26 @@ td:first-child {
 .log-status.failed { color: var(--danger); }
 .log-status.uploading { color: var(--accent); }
 .log-status.queued { color: var(--queued); }
+
+.decrypt-table th:first-child,
+.decrypt-table td:first-child {
+  width: auto;
+}
+
+.decrypt-table th:nth-child(2) { width: 110px; }
+.decrypt-table th:nth-child(3) { width: 120px; }
+.decrypt-table th:nth-child(4) { width: 100px; }
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 6px;
+  padding: 0 12px;
+  text-decoration: none;
+  font-weight: 700;
+}
 
 .empty,
 .empty-state {

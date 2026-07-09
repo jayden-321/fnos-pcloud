@@ -8,11 +8,20 @@ Never commit:
 - pCloud OAuth authorization code
 - pCloud access token
 - pCloud account password
+- `encryption.key`
 - `.env` files
 - `state.sqlite`, `state.sqlite-wal`, `state.sqlite-shm`, or legacy `state.json`
 - generated `.fpk` packages that may contain local test state
 
 The app stores runtime configuration and sync state in SQLite inside the Docker volume mounted at `/data`. That state is local to the NAS and is ignored by git.
+
+If upload encryption is enabled, the app also stores `/data/encryption.key`.
+That key allows unattended scheduled uploads, but anyone who can read it can
+decrypt files uploaded by this app. Back it up securely and keep it out of git,
+support bundles, screenshots, and public issue reports.
+
+The Settings page can export the existing key for backup. Treat the downloaded
+`encryption.key` exactly like the NAS copy: store it offline and never share it.
 
 If a secret is accidentally committed:
 
@@ -22,24 +31,23 @@ If a secret is accidentally committed:
 
 ## Network Exposure
 
-The app's HTTP API does not implement its own login session or API key. It is
-designed to sit behind the fnOS desktop reverse proxy, with
-`disable_authorization_path=false` in `manifest` so fnOS handles access control
-before proxying requests to the app.
+The app's HTTP API does not implement its own login session or API key. Real
+fnOS app center launches this app as an iframe that connects to the NAS LAN
+address and the configured service port, so the package publishes the service
+port on the LAN by default.
 
-Because of that model, the raw service port must not be exposed directly to the
-LAN. A client that can reach the unauthenticated API can read folder and file
-status, change the pCloud sync target, and trigger uploads. In the worst case,
-an attacker on the LAN could point the app at an attacker-owned pCloud account
-and cause NAS files to be uploaded there.
+A client that can reach the unauthenticated API can read folder and file status,
+change the pCloud sync target, and trigger uploads. In the worst case, an
+attacker on the LAN could point the app at an attacker-owned pCloud account and
+cause NAS files to be uploaded there. Install this package only on a trusted LAN.
 
-`app/docker/docker-compose.yaml` therefore binds the published host port to
-`127.0.0.1` by default:
+`app/docker/docker-compose.yaml` binds the published host port to all interfaces
+by default so the fnOS iframe can open the app:
 
 ```yaml
 ports:
-  - "${TRIM_SERVICE_BIND:-127.0.0.1}:${TRIM_SERVICE_PORT:-17880}:8080"
+  - "${TRIM_SERVICE_BIND:-0.0.0.0}:${TRIM_SERVICE_PORT:-17880}:8080"
 ```
 
-Do not set `TRIM_SERVICE_BIND=0.0.0.0` unless you intentionally need direct LAN
-access to the raw app port and accept that it bypasses the fnOS reverse proxy.
+Set `TRIM_SERVICE_BIND=127.0.0.1` only when a separate host-local reverse proxy
+is handling access and direct fnOS iframe launch is not required.

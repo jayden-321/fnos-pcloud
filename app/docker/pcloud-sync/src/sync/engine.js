@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rename, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeConfig } from '../config/config.js';
+import { encryptedRelativePath, encryptFile, loadOrCreateMasterKey } from '../crypto/encryption.js';
 import { PCloudClient } from '../pcloud/client.js';
 import { isIgnored, scanSource } from '../scanner/scanner.js';
 import { planUploads } from './planner.js';
@@ -388,7 +389,8 @@ export class SyncEngine {
           }
         }
 
-        const planOptions = remoteFiles ? { remoteFiles } : {};
+        const encryptionEnabled = config.sync.encryption?.enabled === true;
+        const planOptions = remoteFiles ? { remoteFiles, encryptionEnabled } : { encryptionEnabled };
         result.remoteFiles += remoteFiles?.size ?? 0;
         const plan = planUploads(discovered, known, planOptions);
         const existingCount = remoteFiles
@@ -424,7 +426,7 @@ export class SyncEngine {
 
         for (const file of plan.unchanged) {
           const existing = known.get(file.key) ?? {};
-          plannedFiles.push(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles)));
+          plannedFiles.push(cachedUnchangedFile(source, file, existing, Boolean(remoteFiles), config.sync));
         }
         for (const file of plannedFiles) {
           plannedKeys.add(file.key);
@@ -672,9 +674,11 @@ export class SyncEngine {
           pcloudFileId: upload.pcloudFileId,
           pcloudFolderId: upload.folder?.folderid ?? null,
           pcloudPath: upload.pcloudPath,
+          remotePath: upload.pcloudPath,
           pcloudHash: upload.metadata?.hash === undefined || upload.metadata?.hash === null ? '' : String(upload.metadata.hash),
-          checksumSha1: verification?.sha1 ?? '',
+          checksumSha1: verification?.sha1 ?? upload.encryption?.ciphertextSha1 ?? '',
           checksumVerifiedAt: verification?.verifiedAt ?? '',
+          encryption: upload.encryption ?? undefined,
           syncedAt: new Date().toISOString()
         });
         await this.store.addEvent(upload.verifiedAfterError ? 'upload_verified_after_error' : 'upload_succeeded', file.key, upload.pcloudPath, { size: Number(file.size || 0) });
@@ -781,12 +785,29 @@ export class SyncEngine {
     const progressHash = progressHashForFile(file);
     const remoteFolder = remoteFolderForFile(config, file);
     const folder = await client.ensureFolder(remoteFolder);
+    let uploadPath = file.absolutePath;
+    let uploadFilename = path.posix.basename(file.relativePath);
+    let encryption = null;
+    let tempDir = '';
+    if (config.sync.encryption?.enabled === true) {
+      tempDir = await mkdtemp(path.join(tmpdir(), 'pcloud-encrypt-'));
+      uploadFilename = encryptedUploadFilename(file.relativePath);
+      uploadPath = path.join(tempDir, uploadFilename);
+      const masterKey = await loadOrCreateMasterKey(this.store.dataDir);
+      encryption = await encryptFile({
+        sourcePath: file.absolutePath,
+        targetPath: uploadPath,
+        masterKey
+      });
+      this.updateActiveUploadTotal(file.key, encryption.ciphertextSize);
+    }
+
     const stopProgressPolling = this.startUploadProgressPolling(client, file.key, progressHash);
     let response;
     try {
       response = await client.uploadFile({
-        filePath: file.absolutePath,
-        filename: path.posix.basename(file.relativePath),
+        filePath: uploadPath,
+        filename: uploadFilename,
         folderid: folder.folderid,
         mtime: file.mtime,
         progressHash,
@@ -795,11 +816,22 @@ export class SyncEngine {
       });
     } finally {
       stopProgressPolling();
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
     const metadata = uploadMetadata(response);
     const pcloudFileId = response.fileids?.[0] ?? metadata?.fileid ?? null;
-    const pcloudPath = metadata?.path || joinRemote(remoteFolder, path.posix.basename(file.relativePath));
-    return { client, response, metadata, folder, pcloudFileId, pcloudPath };
+    const pcloudPath = metadata?.path || joinRemote(remoteFolder, uploadFilename);
+    return {
+      client,
+      response,
+      metadata,
+      folder,
+      pcloudFileId,
+      pcloudPath,
+      encryption: encryption ? encryptionRecord(file, pcloudPath, encryption) : null
+    };
   }
 
   async verifySuccessfulUpload(client, file, upload, sync) {
@@ -809,11 +841,11 @@ export class SyncEngine {
     return this.verifyRemoteFileChecksum(client, file, {
       fileid: upload.pcloudFileId,
       path: upload.pcloudPath
-    });
+    }, upload.encryption?.ciphertextSha1 || '');
   }
 
   async verifyAfterUploadError(client, file, sync) {
-    if (sync.checksumMode !== 'failed' || !client?.stat || !client?.checksumFile) {
+    if (sync.encryption?.enabled === true || sync.checksumMode !== 'failed' || !client?.stat || !client?.checksumFile) {
       return null;
     }
     const pcloudPath = file.remotePath;
@@ -834,12 +866,12 @@ export class SyncEngine {
     };
   }
 
-  async verifyRemoteFileChecksum(client, file, target) {
+  async verifyRemoteFileChecksum(client, file, target, expectedSha1 = '') {
     if (!client?.checksumFile) {
       return null;
     }
     const [localSha1, remote] = await Promise.all([
-      sha1File(file.absolutePath),
+      expectedSha1 ? Promise.resolve(expectedSha1) : sha1File(file.absolutePath),
       client.checksumFile(target)
     ]);
     if (remote.sha1 && String(remote.sha1).toLowerCase() !== localSha1) {
@@ -1300,6 +1332,16 @@ export class SyncEngine {
     this.activeUploads.set(key, current);
   }
 
+  updateActiveUploadTotal(key, totalBytes) {
+    const current = this.activeUploads.get(key);
+    if (!current) {
+      return;
+    }
+    current.total = Number(totalBytes || current.total || 0);
+    current.updatedAt = Date.now();
+    this.activeUploads.set(key, current);
+  }
+
   async prepareUploadClient(client) {
     let selected = client;
 
@@ -1421,7 +1463,9 @@ function shouldListRemoteFiles({ source, discovered, known, force = false }) {
     if (!file.relativePath) {
       return true;
     }
-    const expectedRemotePath = joinRemote(source.remotePath, file.relativePath);
+    const expectedRemotePath = file.encryption?.enabled === true
+      ? joinRemote(source.remotePath, file.encryption.remoteRelativePath || encryptedRelativePath(file.relativePath))
+      : joinRemote(source.remotePath, file.relativePath);
     return String(file.remotePath || '') !== expectedRemotePath;
   });
 }
@@ -1498,7 +1542,12 @@ function remoteMtimeDiffers(file) {
     && Math.abs(localMtime - remoteMtime) > 2000;
 }
 
-function cachedUnchangedFile(source, file, existing, remoteListed) {
+function cachedUnchangedFile(source, file, existing, remoteListed, sync = {}) {
+  const encrypted = sync.encryption?.enabled === true && existing.encryption?.enabled === true;
+  const remoteRelativePath = encrypted
+    ? existing.encryption.remoteRelativePath || encryptedRelativePath(file.relativePath)
+    : file.relativePath;
+  const pcloudPath = joinRemote(source.remotePath, remoteRelativePath);
   if (remoteListed) {
     return {
       ...file,
@@ -1507,10 +1556,12 @@ function cachedUnchangedFile(source, file, existing, remoteListed) {
       retryCount: existing.retryCount ?? 0,
       pcloudFileId: file.remote?.fileid ?? existing.pcloudFileId ?? null,
       pcloudFolderId: file.remote?.parentfolderid ?? existing.pcloudFolderId ?? null,
-      pcloudPath: joinRemote(source.remotePath, file.relativePath),
+      pcloudPath,
+      remotePath: pcloudPath,
       pcloudHash: file.remote?.hash ?? existing.pcloudHash ?? '',
       pcloudMtimeMs: file.remote?.mtimeMs ?? existing.pcloudMtimeMs ?? 0,
-      mtimeMismatch: remoteMtimeDiffers(file),
+      encryption: encrypted ? existing.encryption : undefined,
+      mtimeMismatch: encrypted ? false : remoteMtimeDiffers(file),
       existingAt: new Date().toISOString()
     };
   }
@@ -1525,7 +1576,9 @@ function cachedUnchangedFile(source, file, existing, remoteListed) {
     pcloudFileId: existing.pcloudFileId ?? null,
     pcloudFolderId: existing.pcloudFolderId ?? null,
     pcloudHash: existing.pcloudHash ?? '',
-    pcloudPath: existing.pcloudPath ?? joinRemote(source.remotePath, file.relativePath)
+    pcloudPath: existing.pcloudPath ?? pcloudPath,
+    remotePath: existing.remotePath ?? pcloudPath,
+    encryption: existing.encryption
   };
 }
 
@@ -1702,6 +1755,28 @@ function shouldVerifySuccessfulUpload(file, sync) {
     return stablePercent(file.key) < Number(sync.checksumSamplePercent || 0);
   }
   return false;
+}
+
+function encryptedUploadFilename(relativePath) {
+  return path.posix.basename(encryptedRelativePath(relativePath));
+}
+
+function encryptionRecord(file, pcloudPath, encryption) {
+  const remoteRelativePath = encryptedRelativePath(file.relativePath);
+  return {
+    enabled: true,
+    version: encryption.version,
+    algorithm: encryption.algorithm,
+    kdf: encryption.kdf,
+    originalSize: Number(file.size || encryption.plaintextSize || 0),
+    originalMtimeMs: Number(file.mtimeMs || 0),
+    plaintextSha1: encryption.plaintextSha1,
+    ciphertextSize: encryption.ciphertextSize,
+    ciphertextSha1: encryption.ciphertextSha1,
+    remoteRelativePath,
+    remotePath: pcloudPath,
+    encryptedAt: new Date().toISOString()
+  };
 }
 
 function stablePercent(value) {

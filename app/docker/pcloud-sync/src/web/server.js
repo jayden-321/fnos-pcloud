@@ -1,8 +1,12 @@
+import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { normalizeConfig, redactConfig } from '../config/config.js';
+import { decryptFile, loadMasterKey } from '../crypto/encryption.js';
 import { defaultLocalRoots, listLocalFolders } from '../folders/localFolders.js';
 import { PCloudClient } from '../pcloud/client.js';
 import { APP_VERSION } from '../version.js';
@@ -114,6 +118,26 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
     return json(await client.listRemoteFolders(url.searchParams.get('path') || '/'));
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/encryption/browse') {
+    const config = normalizeConfig(await store.loadConfig() ?? {});
+    const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
+    return json(await client.listEncryptedEntries(url.searchParams.get('path') || '/'));
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/encryption/key') {
+    return exportEncryptionKey(store);
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/encryption/download') {
+    const config = normalizeConfig(await store.loadConfig() ?? {});
+    const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
+    return downloadDecryptedFile({
+      store,
+      client,
+      remotePath: url.searchParams.get('path') || ''
+    });
   }
 
   if (request.method === 'GET' && url.pathname === '/api/pcloud/current-server') {
@@ -380,6 +404,104 @@ async function listMtimeMismatchDetails(store, { taskId = '', status = '' } = {}
       verifiedAt: file.mtimeMismatchVerifiedAt || file.checksumVerifiedAt || ''
     }))
   };
+}
+
+async function downloadDecryptedFile({ store, client, remotePath }) {
+  const normalizedRemotePath = String(remotePath || '').trim();
+  if (!normalizedRemotePath.endsWith('.pcenc')) {
+    return json({ error: 'Encrypted pCloud file path must end with .pcenc' }, 400);
+  }
+  if (!client?.downloadFile) {
+    return json({ error: 'pCloud download is unavailable' }, 501);
+  }
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'pcloud-decrypt-download-'));
+  const encryptedPath = path.join(tempDir, 'encrypted.pcenc');
+  const decryptedPath = path.join(tempDir, 'decrypted');
+  try {
+    await client.downloadFile({
+      path: normalizedRemotePath,
+      filePath: encryptedPath
+    });
+    await decryptFile({
+      sourcePath: encryptedPath,
+      targetPath: decryptedPath,
+      masterKey: await loadMasterKey(store.dataDir)
+    });
+    const info = await stat(decryptedPath);
+    const filename = decryptedFilename(normalizedRemotePath);
+    return new Response(fileStreamWithCleanup(decryptedPath, tempDir), {
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': String(info.size),
+        'content-disposition': contentDisposition(filename)
+      }
+    });
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function exportEncryptionKey(store) {
+  const keyPath = path.join(store.dataDir, 'encryption.key');
+  let body;
+  try {
+    body = await readFile(keyPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return json({ error: 'Encryption key is not configured' }, 404);
+    }
+    throw error;
+  }
+  await loadMasterKey(store.dataDir);
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/octet-stream',
+      'content-length': String(body.length),
+      'content-disposition': contentDisposition('encryption.key'),
+      'cache-control': 'no-store'
+    }
+  });
+}
+
+function fileStreamWithCleanup(filePath, tempDir) {
+  const source = Readable.from((async function* streamFile() {
+    try {
+      for await (const chunk of createReadStream(filePath)) {
+        yield chunk;
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  })());
+  return Readable.toWeb(source);
+}
+
+function decryptedFilename(remotePath) {
+  const name = path.posix.basename(String(remotePath || 'download.pcenc'));
+  return name.endsWith('.pcenc') ? name.slice(0, -'.pcenc'.length) || 'download' : name;
+}
+
+function contentDisposition(filename) {
+  const fallback = asciiFilenameFallback(filename);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987(filename)}`;
+}
+
+function asciiFilenameFallback(filename) {
+  const name = String(filename || 'download').replaceAll('"', '').replaceAll('\\', '').replaceAll(';', '');
+  const cleaned = name.replace(/[^\x20-\x7E]/g, '').trim();
+  if (cleaned && !cleaned.startsWith('.')) {
+    return cleaned;
+  }
+  const ext = path.posix.extname(name).replace(/[^\x20-\x7E]/g, '');
+  return `download${ext && ext !== '.' ? ext : ''}`;
+}
+
+function encodeRfc5987(value) {
+  return encodeURIComponent(String(value || 'download'))
+    .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/\*/g, '%2A');
 }
 
 function contentType(filePath) {

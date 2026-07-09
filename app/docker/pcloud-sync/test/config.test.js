@@ -11,6 +11,7 @@ test('normalizeConfig supplies safe defaults for first run', () => {
   assert.equal(config.sync.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   assert.equal(config.sync.logRetentionDays, 30);
   assert.equal(config.sync.logRetentionCount, 300);
+  assert.equal(config.sync.encryption.enabled, false);
   assert.equal(config.pcloud.hostname, 'api.pcloud.com');
   assert.equal(config.pcloud.remoteRoot, '/');
   assert.deepEqual(config.tasks, []);
@@ -68,7 +69,8 @@ test('normalizeConfig keeps official upload conflict and checksum options', () =
       renameIfExists: true,
       checksumMode: 'sample',
       checksumSamplePercent: 25,
-      mtimeVerifyConcurrency: 7
+      mtimeVerifyConcurrency: 7,
+      encryption: { enabled: true }
     }
   });
 
@@ -76,6 +78,7 @@ test('normalizeConfig keeps official upload conflict and checksum options', () =
   assert.equal(config.sync.checksumMode, 'sample');
   assert.equal(config.sync.checksumSamplePercent, 25);
   assert.equal(config.sync.mtimeVerifyConcurrency, 7);
+  assert.equal(config.sync.encryption.enabled, true);
 
   const fallback = normalizeConfig({
     sync: {
@@ -90,6 +93,7 @@ test('normalizeConfig keeps official upload conflict and checksum options', () =
   assert.equal(fallback.sync.checksumMode, 'failed');
   assert.equal(fallback.sync.checksumSamplePercent, 100);
   assert.equal(fallback.sync.mtimeVerifyConcurrency, 10);
+  assert.equal(fallback.sync.encryption.enabled, false);
 });
 
 test('normalizeConfig validates scheduler timezones', () => {

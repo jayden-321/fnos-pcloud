@@ -73,6 +73,7 @@ test('SyncEngine passes renameifexists and verifies successful uploads when chec
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
   const filePath = path.join(sourceDir, 'a.txt');
   await writeFile(filePath, 'hello');
+  const info = await stat(filePath);
   const calls = [];
 
   const store = new SqliteStore(dataDir);
@@ -117,6 +118,74 @@ test('SyncEngine passes renameifexists and verifies successful uploads when chec
   ]);
   assert.equal(files[0].checksumSha1, 'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d');
   assert.ok(files[0].checksumVerifiedAt);
+});
+
+test('SyncEngine encrypts files before upload when local encryption is enabled', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-data-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-engine-source-'));
+  const filePath = path.join(sourceDir, 'a.txt');
+  await writeFile(filePath, 'hello');
+  const info = await stat(filePath);
+  let uploadedContent = null;
+  const calls = [];
+
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  await store.saveConfig(normalizeConfig({
+    pcloud: { accessToken: 'token' },
+    sync: { checksumMode: 'all', encryption: { enabled: true } },
+    tasks: [{ id: 'docs', name: 'Docs', localPath: sourceDir, remotePath: '/Sync/docs', enabled: true }]
+  }));
+  await store.upsertFile({
+    key: 'docs/a.txt',
+    sourceId: 'docs',
+    absolutePath: filePath,
+    relativePath: 'a.txt',
+    remotePath: '/Sync/docs/a.txt',
+    size: 5,
+    mtimeMs: Math.trunc(info.mtimeMs),
+    mtime: Math.trunc(info.mtimeMs / 1000),
+    status: 'pending'
+  });
+
+  const engine = new SyncEngine({
+    store,
+    pcloudFactory: () => ({
+      ensureFolder: async (remotePath) => {
+        calls.push(['ensureFolder', remotePath]);
+        return { folderid: 42 };
+      },
+      uploadFile: async (payload) => {
+        uploadedContent = await readFile(payload.filePath);
+        calls.push(['uploadFile', payload.filename, payload.folderid]);
+        return { fileids: [209], metadata: [{ fileid: 209, name: payload.filename, path: '/Sync/docs/a.txt.pcenc' }] };
+      },
+      checksumFile: async (payload) => {
+        calls.push(['checksumFile', payload.fileid]);
+        return { sha1: sha1ForTest(uploadedContent) };
+      }
+    })
+  });
+
+  const result = await engine.processPending();
+  const files = await store.listFiles();
+  const keyFile = await stat(path.join(dataDir, 'encryption.key'));
+
+  assert.equal(result.uploaded, 1);
+  assert.deepEqual(calls, [
+    ['ensureFolder', '/Sync/docs'],
+    ['uploadFile', 'a.txt.pcenc', 42],
+    ['checksumFile', 209]
+  ]);
+  assert.equal(uploadedContent.subarray(0, 8).toString('utf8'), 'PCNSENC1');
+  assert.notEqual(uploadedContent.toString('utf8'), 'hello');
+  assert.equal(keyFile.mode & 0o077, 0);
+  assert.equal(files[0].pcloudPath, '/Sync/docs/a.txt.pcenc');
+  assert.equal(files[0].encryption.enabled, true);
+  assert.equal(files[0].encryption.originalSize, 5);
+  assert.equal(files[0].encryption.remoteRelativePath, 'a.txt.pcenc');
+  assert.equal(files[0].encryption.ciphertextSha1, sha1ForTest(uploadedContent));
+  assert.equal(files[0].checksumSha1, sha1ForTest(uploadedContent));
 });
 
 test('SyncEngine runs a pCloud upload and download speed test without syncing files', async () => {

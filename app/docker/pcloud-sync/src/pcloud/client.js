@@ -140,6 +140,36 @@ export class PCloudClient {
     return { path: currentPath, parent: parentRemotePath(currentPath), entries };
   }
 
+  async listEncryptedEntries(remotePath = '/') {
+    const normalized = normalizeRemotePath(remotePath);
+    let response;
+    try {
+      response = await this.requestJson('listfolder', {
+        path: normalized,
+        recursive: '0',
+        nofiles: '0'
+      });
+    } catch (error) {
+      if (error.result === 2005 || /does not exist/i.test(error.message)) {
+        return { path: normalized, parent: parentRemotePath(normalized), entries: [] };
+      }
+      throw error;
+    }
+
+    const currentPath = normalizeRemotePath(response.metadata?.path || normalized);
+    const entries = (response.metadata?.contents ?? [])
+      .map((item) => encryptedBrowseEntry(item, currentPath))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.type !== b.type) {
+          return a.type === 'folder' ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+    return { path: currentPath, parent: parentRemotePath(currentPath), entries };
+  }
+
   async uploadProgress(progressHash) {
     return this.requestJson('uploadprogress', { progresshash: progressHash });
   }
@@ -412,6 +442,33 @@ function folderMetadata(metadata, fallbackPath) {
   return {
     folderid: metadata.folderid ?? null,
     path: normalizeRemotePath(metadata.path || fallbackPath)
+  };
+}
+
+function encryptedBrowseEntry(item, currentPath) {
+  const name = String(item?.name || '');
+  const entryPath = normalizeRemotePath(item?.path || `${currentPath}/${name}`);
+  if (item?.isfolder) {
+    return {
+      type: 'folder',
+      name,
+      path: entryPath,
+      folderid: item.folderid ?? null
+    };
+  }
+  if (!name.endsWith('.pcenc')) {
+    return null;
+  }
+  return {
+    type: 'encrypted-file',
+    name,
+    decryptedName: name.slice(0, -'.pcenc'.length),
+    path: entryPath,
+    fileid: item.fileid ?? null,
+    size: Number(item.size || 0),
+    mtime: parseRemoteMtime(item),
+    mtimeMs: parseRemoteMtime(item) * 1000,
+    hash: item.hash === undefined || item.hash === null ? '' : String(item.hash)
   };
 }
 

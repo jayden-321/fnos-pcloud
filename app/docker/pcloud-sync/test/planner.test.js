@@ -131,3 +131,71 @@ test('planUploads ignores old local state when the new remote directory is missi
 
   assert.deepEqual(plan.pending.map((item) => item.key), ['财务/a.txt']);
 });
+
+test('planUploads matches encrypted remotes only when local encrypted state agrees', () => {
+  const discovered = [
+    { key: 'docs/a.txt', relativePath: 'a.txt', size: 5, mtimeMs: 2000 }
+  ];
+  const known = new Map([
+    ['docs/a.txt', {
+      key: 'docs/a.txt',
+      relativePath: 'a.txt',
+      size: 5,
+      mtimeMs: 2000,
+      status: 'synced',
+      encryption: {
+        enabled: true,
+        remoteRelativePath: 'a.txt.pcenc',
+        ciphertextSize: 128
+      }
+    }]
+  ]);
+  const remote = new Map([
+    ['a.txt.pcenc', { relativePath: 'a.txt.pcenc', size: 128, mtimeMs: 2000 }]
+  ]);
+
+  const plan = planUploads(discovered, known, { remoteFiles: remote, encryptionEnabled: true });
+
+  assert.deepEqual(plan.pending, []);
+  assert.equal(plan.unchanged[0].remote.relativePath, 'a.txt.pcenc');
+});
+
+test('planUploads reuploads encrypted tasks when a remote ciphertext has no local key state', () => {
+  const discovered = [
+    { key: 'docs/a.txt', relativePath: 'a.txt', size: 5, mtimeMs: 2000 }
+  ];
+  const remote = new Map([
+    ['a.txt.pcenc', { relativePath: 'a.txt.pcenc', size: 128, mtimeMs: 2000 }]
+  ]);
+
+  const plan = planUploads(discovered, new Map(), { remoteFiles: remote, encryptionEnabled: true });
+
+  assert.deepEqual(plan.pending.map((item) => item.key), ['docs/a.txt']);
+  assert.deepEqual(plan.unchanged, []);
+});
+
+test('planUploads keeps cached encrypted files unchanged when the local snapshot matches', () => {
+  const discovered = [
+    { key: 'docs/a.txt', relativePath: 'a.txt', remotePath: '/Sync/docs/a.txt', size: 5, mtimeMs: 2000 }
+  ];
+  const known = new Map([
+    ['docs/a.txt', {
+      key: 'docs/a.txt',
+      relativePath: 'a.txt',
+      remotePath: '/Sync/docs/a.txt.pcenc',
+      size: 5,
+      mtimeMs: 2000,
+      status: 'synced',
+      encryption: {
+        enabled: true,
+        remoteRelativePath: 'a.txt.pcenc',
+        ciphertextSize: 128
+      }
+    }]
+  ]);
+
+  const plan = planUploads(discovered, known, { encryptionEnabled: true });
+
+  assert.deepEqual(plan.pending, []);
+  assert.deepEqual(plan.unchanged.map((item) => item.key), ['docs/a.txt']);
+});

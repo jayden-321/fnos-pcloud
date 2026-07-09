@@ -45,16 +45,37 @@ test('settings exposes official pCloud upload and checksum options', async () =>
   assert.match(html, /name="checksumSamplePercent"/);
   assert.match(html, /name="mtimeVerifyConcurrency"/);
   assert.match(html, /name="timezone"/);
+  assert.match(html, /name="encryptionEnabled"/);
+  assert.match(html, /id="exportEncryptionKey"/);
   assert.match(html, /失败后校验/);
   assert.match(html, /抽样校验/);
   assert.match(html, /全部校验/);
   assert.match(html, /时间不同校验并发数/);
   assert.match(html, /定时任务时区/);
+  assert.match(html, /上传前加密文件内容/);
   assert.match(script, /renameIfExists/);
   assert.match(script, /checksumMode/);
   assert.match(script, /checksumSamplePercent/);
   assert.match(script, /mtimeVerifyConcurrency/);
+  assert.match(script, /encryptionEnabled/);
+  assert.match(script, /exportEncryptionKey/);
+  assert.match(script, /\/api\/encryption\/key/);
   assert.match(script, /scheduleTimezoneValue/);
+});
+
+test('web UI exposes decrypt browse tab and encrypted download actions', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /data-tab="decrypt"/);
+  assert.match(html, /id="decryptRows"/);
+  assert.match(html, /id="decryptPath"/);
+  assert.match(script, /loadDecryptFolder/);
+  assert.match(script, /\/api\/encryption\/browse/);
+  assert.match(script, /\/api\/encryption\/download/);
+  assert.match(script, /decryptedName/);
 });
 
 test('settings exposes pCloud upload and download speed test controls', async () => {

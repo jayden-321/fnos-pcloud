@@ -191,6 +191,58 @@ test('PCloudClient lists immediate remote folders for picker navigation', async 
   }
 });
 
+test('PCloudClient lists immediate folders and encrypted files for decrypt browsing', async () => {
+  const server = await withServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    res.setHeader('content-type', 'application/json');
+    assert.equal(url.pathname, '/listfolder');
+    assert.equal(url.searchParams.get('recursive'), '0');
+    assert.equal(url.searchParams.get('nofiles'), '0');
+    res.end(JSON.stringify({
+      result: 0,
+      metadata: {
+        folderid: 0,
+        path: '/NAS',
+        contents: [
+          { isfolder: true, folderid: 11, name: '财务', path: '/NAS/财务' },
+          { isfolder: false, fileid: 9, name: 'a.txt', path: '/NAS/a.txt', size: 5 },
+          { isfolder: false, fileid: 10, name: '合同.pdf.pcenc', path: '/NAS/合同.pdf.pcenc', size: 99, modified: 'Fri, 26 Jun 2026 10:00:00 +0000' }
+        ]
+      }
+    }));
+  });
+
+  try {
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token' });
+    const entries = await client.listEncryptedEntries('/NAS');
+
+    assert.equal(entries.path, '/NAS');
+    assert.deepEqual(entries.entries.map((entry) => [entry.type, entry.name, entry.decryptedName || '']), [
+      ['folder', '财务', ''],
+      ['encrypted-file', '合同.pdf.pcenc', '合同.pdf']
+    ]);
+    assert.equal(entries.entries[1].mtime, 1782468000);
+  } finally {
+    await server.close();
+  }
+});
+
+test('PCloudClient treats missing encrypted browse folders as empty', async () => {
+  const server = await withServer((_req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ result: 2005, error: 'Directory does not exist.' }));
+  });
+
+  try {
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token' });
+    const entries = await client.listEncryptedEntries('/NAS/missing');
+
+    assert.deepEqual(entries, { path: '/NAS/missing', parent: '/NAS', entries: [] });
+  } finally {
+    await server.close();
+  }
+});
+
 test('PCloudClient streams uploadfile multipart with nopartial and mtime', async () => {
   let body = '';
   const server = await withServer((req, res) => {

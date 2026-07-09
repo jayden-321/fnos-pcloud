@@ -17,7 +17,10 @@ const DEFAULT_CONFIG = {
     checksumMode: 'failed',
     checksumSamplePercent: 5,
     mtimeVerifyConcurrency: 3,
-    timezone: systemTimezone()
+    timezone: systemTimezone(),
+    encryption: {
+      enabled: false
+    }
   },
   tasks: [],
   sources: []
@@ -87,7 +90,14 @@ function normalizeSync(input) {
     checksumSamplePercent: clampInteger(input.checksumSamplePercent, DEFAULT_CONFIG.sync.checksumSamplePercent, 0, 100),
     mtimeVerifyConcurrency: clampInteger(input.mtimeVerifyConcurrency, DEFAULT_CONFIG.sync.mtimeVerifyConcurrency, 1, 10),
     timezone: normalizeTimezone(input.timezone),
+    encryption: normalizeEncryption(input.encryption ?? { enabled: input.encryptionEnabled }),
     ignorePatterns: normalizeIgnorePatterns(input.ignorePatterns ?? DEFAULT_CONFIG.sync.ignorePatterns)
+  };
+}
+
+function normalizeEncryption(input = {}) {
+  return {
+    enabled: input?.enabled === true
   };
 }
 

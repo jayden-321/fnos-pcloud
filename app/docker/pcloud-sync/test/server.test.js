@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/web/server.js';
+import { encryptFile, loadOrCreateMasterKey } from '../src/crypto/encryption.js';
 import { SqliteStore } from '../src/store/sqliteStore.js';
 import { APP_VERSION } from '../src/version.js';
 
@@ -460,6 +461,113 @@ test('HTTP API lists and creates remote pCloud folders', async () => {
   assert.deepEqual(await rootListResponse.json(), { path: '/', parent: '/', entries: [{ name: '财务', path: '/财务', folderid: 7 }] });
   assert.deepEqual(await createResponse.json(), { folderid: 8, path: '/NAS/New' });
   assert.deepEqual(calls, [['list', '/NAS'], ['list', '/'], ['create', '/NAS/New']]);
+});
+
+test('HTTP API browses encrypted pCloud files for decrypt download', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-browse-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  await store.saveConfig({
+    port: 8080,
+    pcloud: { accessToken: 'secret', hostname: 'api.pcloud.com', remoteRoot: '/NAS' },
+    sync: { intervalSeconds: 300, concurrency: 2, ignorePatterns: [], encryption: { enabled: true } },
+    tasks: []
+  });
+  const calls = [];
+
+  const app = createApp({
+    store,
+    engine: {},
+    pcloudFactory: () => ({
+      listEncryptedEntries: async (remotePath) => {
+        calls.push(remotePath);
+        return {
+          path: '/NAS/docs',
+          parent: '/NAS',
+          entries: [
+            { type: 'folder', name: 'nested', path: '/NAS/docs/nested' },
+            { type: 'encrypted-file', name: '合同.pdf.pcenc', decryptedName: '合同.pdf', path: '/NAS/docs/合同.pdf.pcenc', size: 512 }
+          ]
+        };
+      }
+    })
+  });
+
+  const response = await app.fetch(new Request('http://local/api/encryption/browse?path=/NAS/docs'));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ['/NAS/docs']);
+  assert.deepEqual(body, {
+    path: '/NAS/docs',
+    parent: '/NAS',
+    entries: [
+      { type: 'folder', name: 'nested', path: '/NAS/docs/nested' },
+      { type: 'encrypted-file', name: '合同.pdf.pcenc', decryptedName: '合同.pdf', path: '/NAS/docs/合同.pdf.pcenc', size: 512 }
+    ]
+  });
+});
+
+test('HTTP API downloads an encrypted pCloud file and returns decrypted content', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-download-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-source-'));
+  const plainPath = path.join(sourceDir, 'plain.txt');
+  const encryptedPath = path.join(sourceDir, 'plain.txt.pcenc');
+  await writeFile(plainPath, 'secret contract');
+
+  const store = new SqliteStore(dir);
+  await store.init();
+  const masterKey = await loadOrCreateMasterKey(dir);
+  await encryptFile({ sourcePath: plainPath, targetPath: encryptedPath, masterKey });
+  await store.saveConfig({
+    port: 8080,
+    pcloud: { accessToken: 'secret', hostname: 'api.pcloud.com', remoteRoot: '/NAS' },
+    sync: { intervalSeconds: 300, concurrency: 2, ignorePatterns: [], encryption: { enabled: true } },
+    tasks: []
+  });
+  const calls = [];
+
+  const app = createApp({
+    store,
+    engine: {},
+    pcloudFactory: () => ({
+      downloadFile: async ({ path: remotePath, filePath }) => {
+        calls.push(remotePath);
+        await writeFile(filePath, await readFile(encryptedPath));
+        return { bytes: 1 };
+      }
+    })
+  });
+
+  const response = await app.fetch(new Request('http://local/api/encryption/download?path=/NAS/docs/合同.pdf.pcenc'));
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'secret contract');
+  assert.deepEqual(calls, ['/NAS/docs/合同.pdf.pcenc']);
+  assert.match(response.headers.get('content-disposition'), /filename="download\.pdf"/);
+  assert.match(response.headers.get('content-disposition'), /filename\*=UTF-8''%E5%90%88%E5%90%8C\.pdf/);
+});
+
+test('HTTP API exports the existing local encryption key without creating it', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-key-export-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+
+  const app = createApp({ store, engine: {} });
+  const missingResponse = await app.fetch(new Request('http://local/api/encryption/key'));
+
+  assert.equal(missingResponse.status, 404);
+  await assert.rejects(readFile(path.join(dir, 'encryption.key')), { code: 'ENOENT' });
+
+  await loadOrCreateMasterKey(dir);
+  const keyFile = await readFile(path.join(dir, 'encryption.key'), 'utf8');
+  const response = await app.fetch(new Request('http://local/api/encryption/key'));
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), keyFile);
+  assert.equal(response.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.match(response.headers.get('content-disposition'), /filename="encryption\.key"/);
 });
 
 test('HTTP API exposes pCloud progress, checksum, diff, and server APIs', async () => {

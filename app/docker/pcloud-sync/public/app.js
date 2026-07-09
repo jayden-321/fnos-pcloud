@@ -13,6 +13,13 @@ let currentStatus = null;
 let currentEvents = [];
 let folderPicker = null;
 
+const decryptBrowser = {
+  path: '/',
+  parent: '/',
+  loaded: false,
+  entries: []
+};
+
 const fields = {
   hostname: form.elements.hostname,
   clientId: form.elements.clientId,
@@ -24,6 +31,7 @@ const fields = {
   checksumMode: form.elements.checksumMode,
   checksumSamplePercent: form.elements.checksumSamplePercent,
   mtimeVerifyConcurrency: form.elements.mtimeVerifyConcurrency,
+  encryptionEnabled: form.elements.encryptionEnabled,
   timezone: form.elements.timezone,
   logRetentionDays: form.elements.logRetentionDays,
   logRetentionCount: form.elements.logRetentionCount,
@@ -34,6 +42,13 @@ const eventFilters = {
   task: document.querySelector('#eventTaskFilter'),
   status: document.querySelector('#eventStatusFilter'),
   search: document.querySelector('#eventSearch')
+};
+
+const decryptControls = {
+  path: document.querySelector('#decryptPath'),
+  rows: document.querySelector('#decryptRows'),
+  up: document.querySelector('#decryptUp'),
+  refresh: document.querySelector('#decryptRefresh')
 };
 
 for (const control of Object.values(eventFilters)) {
@@ -118,6 +133,8 @@ document.querySelector('#testPcloud').addEventListener('click', async () => {
   show(`连接成功：${result.email || result.userid || 'pCloud'}`);
 });
 
+document.querySelector('#exportEncryptionKey').addEventListener('click', exportEncryptionKey);
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   await saveConfig();
@@ -178,6 +195,21 @@ document.querySelector('#folderEntries').addEventListener('click', async (event)
   }
 });
 
+decryptControls.up.addEventListener('click', async () => {
+  await loadDecryptFolder(decryptBrowser.parent || '/');
+});
+
+decryptControls.refresh.addEventListener('click', async () => {
+  await loadDecryptFolder(decryptBrowser.path || '/');
+});
+
+decryptControls.rows.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-decrypt-folder]');
+  if (button) {
+    await loadDecryptFolder(button.dataset.decryptFolder || '/');
+  }
+});
+
 await loadConfig();
 await refreshStatus();
 showTab('tasks');
@@ -194,6 +226,7 @@ async function loadConfig() {
   fields.checksumMode.value = currentConfig.sync.checksumMode || 'failed';
   fields.checksumSamplePercent.value = currentConfig.sync.checksumSamplePercent ?? 5;
   fields.mtimeVerifyConcurrency.value = currentConfig.sync.mtimeVerifyConcurrency ?? 3;
+  fields.encryptionEnabled.checked = currentConfig.sync.encryption?.enabled === true;
   fields.timezone.value = scheduleTimezoneValue(currentConfig.sync.timezone);
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
   fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
@@ -224,6 +257,9 @@ async function saveConfig() {
       checksumMode: fields.checksumMode.value,
       checksumSamplePercent: Number(fields.checksumSamplePercent.value),
       mtimeVerifyConcurrency: Number(fields.mtimeVerifyConcurrency.value),
+      encryption: {
+        enabled: fields.encryptionEnabled.checked
+      },
       timezone: fields.timezone.value.trim(),
       logRetentionDays: Number(fields.logRetentionDays.value),
       logRetentionCount: Number(fields.logRetentionCount.value),
@@ -231,6 +267,37 @@ async function saveConfig() {
     }
   });
   renderTaskEditors(currentConfig.tasks || []);
+}
+
+async function exportEncryptionKey() {
+  const button = document.querySelector('#exportEncryptionKey');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/encryption/key');
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const body = await response.json();
+        message = body.error || message;
+      } catch {
+        // Ignore non-JSON error bodies from interrupted downloads.
+      }
+      throw new Error(message);
+    }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = 'encryption.key';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    show('加密密钥已导出');
+  } catch (error) {
+    show(error.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function refreshStatus() {
@@ -272,8 +339,11 @@ function showTab(tab) {
   for (const panel of document.querySelectorAll('[data-panel]')) {
     panel.hidden = panel.dataset.panel !== tab;
   }
-  const title = { tasks: '同步任务', logs: '同步日志', settings: '设置' }[tab] || '同步任务';
+  const title = { tasks: '同步任务', logs: '同步日志', decrypt: '解密浏览', settings: '设置' }[tab] || '同步任务';
   setText('pageTitle', title);
+  if (tab === 'decrypt' && !decryptBrowser.loaded) {
+    loadDecryptFolder(decryptBrowser.path || '/').catch((error) => show(error.message));
+  }
 }
 
 function renderTaskCards() {
@@ -728,6 +798,54 @@ async function loadFolder(targetPath) {
   document.querySelector('#folderEntries').innerHTML = result.entries.map((entry) => `
     <li><button type="button" data-path="${escapeHtml(entry.path)}">${escapeHtml(entry.name)}</button></li>
   `).join('') || '<li class="empty">没有子文件夹</li>';
+}
+
+async function loadDecryptFolder(remotePath = '/') {
+  decryptBrowser.loaded = true;
+  decryptControls.up.disabled = true;
+  decryptControls.rows.innerHTML = '<tr><td colspan="4" class="empty">加载中</td></tr>';
+  try {
+    const result = await get(`/api/encryption/browse?path=${encodeURIComponent(remotePath || '/')}`);
+    decryptBrowser.path = result.path || '/';
+    decryptBrowser.parent = result.parent || '/';
+    decryptBrowser.entries = result.entries || [];
+    renderDecryptBrowser();
+  } catch (error) {
+    decryptControls.rows.innerHTML = `<tr><td colspan="4" class="danger">${escapeHtml(error.message)}</td></tr>`;
+    show(error.message);
+  }
+}
+
+function renderDecryptBrowser() {
+  decryptControls.path.textContent = decryptBrowser.path || '/';
+  decryptControls.up.disabled = !decryptBrowser.parent || decryptBrowser.path === '/';
+  decryptControls.rows.innerHTML = decryptBrowser.entries.map((entry) => {
+    if (entry.type === 'folder') {
+      return `
+        <tr>
+          <td>${escapeHtml(entry.name)}</td>
+          <td>文件夹</td>
+          <td>--</td>
+          <td><button type="button" data-decrypt-folder="${escapeHtml(entry.path)}">打开</button></td>
+        </tr>
+      `;
+    }
+    const decryptedName = entry.decryptedName || stripEncryptedSuffix(entry.name);
+    const downloadUrl = `/api/encryption/download?path=${encodeURIComponent(entry.path)}`;
+    return `
+      <tr>
+        <td>${escapeHtml(decryptedName)}</td>
+        <td>加密文件</td>
+        <td>${escapeHtml(formatBytes(entry.size || 0))}</td>
+        <td><a class="button-link" href="${downloadUrl}" download="${escapeHtml(decryptedName)}">下载</a></td>
+      </tr>
+    `;
+  }).join('') || '<tr><td colspan="4" class="empty">暂无加密文件</td></tr>';
+}
+
+function stripEncryptedSuffix(name) {
+  const text = String(name || '');
+  return text.endsWith('.pcenc') ? text.slice(0, -'.pcenc'.length) : text;
 }
 
 function updateTaskOptions(rows) {

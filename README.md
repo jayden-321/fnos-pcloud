@@ -6,7 +6,7 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 
 - One-way uploads from multiple NAS folders to pCloud.
 - Local deletions are not propagated to pCloud.
-- Web UI with Sync Tasks, Sync Logs, and Settings pages.
+- Web UI with Sync Tasks, Sync Logs, Decrypt Browse, and Settings pages.
 - Local folder picker for NAS paths that are visible inside the container.
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, active uploads, and aggregate upload speed.
@@ -19,11 +19,13 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Filterable file-level sync logs with file size, status, and active upload progress.
 - Optional pCloud upload conflict renaming through `uploadfile` `renameifexists`.
 - Optional upload verification through `checksumfile`: off, failed-upload verification, sampled verification, or all uploads.
+- Optional content encryption before upload. Encrypted tasks store a local master key on the NAS and upload `.pcenc` ciphertext files to pCloud.
+- Decrypt Browse tab for listing encrypted pCloud files, downloading locally decrypted copies, and exporting the local key for backup.
 - SQLite runtime state for config, file records, and sync logs.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
 - Active sync runs can be stopped from the web UI; stopped uploads return to the pending queue.
-- The raw app port binds to host loopback by default so unauthenticated APIs stay behind the fnOS reverse proxy.
+- The fnOS app center launch port is reachable from the LAN by default so the desktop iframe can open the app.
 
 ## pCloud Authorization
 
@@ -60,6 +62,30 @@ The sync logic uses the official pCloud HTTP/JSON API:
 
 The local folder picker reads NAS paths that are mounted into the Docker container. pCloud does not provide an API for local NAS filesystem browsing. Remote folder browsing, remote folder creation, uploads, progress, and verification-related features are implemented through pCloud APIs.
 
+## Content Encryption
+
+The Settings page can enable upload-time content encryption. When enabled, the
+app creates a random 32-byte master key at `/data/encryption.key` and reuses it
+for scheduled uploads. Each file is encrypted into a temporary AES-256-GCM
+envelope with a per-file salt and nonce, then uploaded to pCloud with a `.pcenc`
+suffix. The temporary ciphertext is deleted after the upload attempt.
+
+This protects file contents from being readable in pCloud, but it does not hide
+folder names or file names beyond the `.pcenc` suffix. It also does not protect
+against an attacker who can read the NAS app data directory, because the local
+key must be available for unattended scheduled uploads.
+
+Back up `/data/encryption.key`. If that key is lost, previously uploaded
+encrypted files cannot be decrypted by this app.
+
+The Settings page can export the existing `/data/encryption.key` file for
+offline backup. Exporting does not create a new key.
+
+The Decrypt Browse tab reads pCloud folders, shows only folders and `.pcenc`
+encrypted files, and downloads selected files by fetching the ciphertext,
+decrypting it locally with `/data/encryption.key`, and returning the original
+filename without the `.pcenc` suffix.
+
 ## NAS Folder Mounts
 
 The default Docker Compose file mounts `/vol1` read-only:
@@ -91,19 +117,18 @@ args:
 
 ## Network Exposure
 
-The app API does not have built-in authentication. It is intended to be reached
-through the fnOS desktop reverse proxy, which performs login enforcement before
-proxying requests to the app. For that reason, Docker Compose binds the raw
-service port to `127.0.0.1` by default:
+The app API does not have built-in authentication. Real fnOS app center launches
+this app as an iframe that connects to the NAS LAN address and the configured
+service port, so Docker Compose publishes the app on the LAN by default:
 
 ```yaml
 ports:
-  - "${TRIM_SERVICE_BIND:-127.0.0.1}:${TRIM_SERVICE_PORT:-17880}:8080"
+  - "${TRIM_SERVICE_BIND:-0.0.0.0}:${TRIM_SERVICE_PORT:-17880}:8080"
 ```
 
-Only set `TRIM_SERVICE_BIND=0.0.0.0` if direct LAN access is intentional and you
-accept that it bypasses fnOS reverse-proxy authorization. See
-[SECURITY.md](SECURITY.md) for details.
+Install the package only on a trusted LAN. If you run a separate host-local
+reverse proxy in front of the app and do not need direct fnOS iframe access, set
+`TRIM_SERVICE_BIND=127.0.0.1`. See [SECURITY.md](SECURITY.md) for details.
 
 ## Local Development
 
@@ -127,15 +152,19 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.4.1 is one-way upload only, not two-way sync.
-- v0.4.1 does not propagate local deletions to pCloud.
-- v0.4.1 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.4.6 is one-way upload only, not two-way sync.
+- v0.4.6 does not propagate local deletions to pCloud.
+- v0.4.6 content encryption protects file contents only; folder and file names remain visible with a `.pcenc` suffix.
+- v0.4.6 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.4.6: Adds a Decrypt Browse tab and Settings key export for encrypted pCloud files. The tab lists folders and `.pcenc` files, exports the existing `/data/encryption.key` for backup, downloads ciphertext through pCloud, decrypts it locally with `/data/encryption.key`, and returns the original filename/content.
+- v0.4.5: Adds optional local-key content encryption before upload. When enabled, the app stores `/data/encryption.key` locally, uploads AES-256-GCM encrypted `.pcenc` files to pCloud, and records encrypted-file metadata for future scans.
+- v0.4.2: Restores the default Docker port bind to `0.0.0.0` so fnOS app center iframe launches can reach `NAS-IP:17880` after install. Set `TRIM_SERVICE_BIND=127.0.0.1` only when a separate host-local reverse proxy is handling access.
 - v0.4.1: Adds explicit resolution actions for verified mtime content mismatches. The mismatch detail dialog can upload the local file over pCloud or download the pCloud file over the local copy. The pCloud speed test now reports upload/download progress and times out stalled API/download requests instead of staying in the downloading phase forever.
 - v0.4.0: Adds timezone-aware daily and weekly task schedules, a Settings field for the scheduler timezone, Node.js 22.13 as the documented runtime baseline for `node:sqlite`, and a repository design-system reference generated from the Claude Design work.
 - v0.3.9: Adds pause support for long mtime-mismatch verification jobs. Running verification menus now expose Pause Verification, stop taking new checksum work after the current in-flight requests finish, preserve completed SQLite results, and allow the next run to continue remaining files.
