@@ -11,6 +11,7 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Encrypted snapshot browsing backed by a locally cached, encrypted cloud index.
 - File downloads, folder ZIP downloads, repository checks, retention policies, prune, and isolated restores to a dedicated NAS directory.
 - Full-fidelity Restic backups by default: no filename or file-type exclusion is added unless the user explicitly configures an ignore pattern.
+- Detailed live Restic status with phase, elapsed time, current and average speed, ETA, current files, recent activity, and error count.
 - Local folder picker for NAS paths that are visible inside the container.
 - pCloud remote folder picker and remote folder creation.
 - Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, and active uploads.
@@ -84,6 +85,12 @@ The UI uses the cached index for fast snapshot and folder browsing. Selected
 files can be downloaded, folders can be returned as ZIP archives, and restores
 are written below the dedicated `/restore` mount without overwriting the source.
 
+If the app or container stops during a backup, the interrupted run does not
+remain as a resumable in-memory job. After the app starts again, run the task
+again (or wait for its next enabled schedule). Restic scans the source again,
+but its content-addressed deduplication reuses data already stored in the
+repository, so completed data blocks are not blindly uploaded a second time.
+
 ## NAS Folder Mounts
 
 The default Docker Compose file mounts `/vol1` and `/vol2` read-only and exposes
@@ -153,15 +160,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.5.8 is a backup application, not a two-way sync client.
+- v0.5.9 is a backup application, not a two-way sync client.
 - Legacy upload tasks do not propagate local deletions to pCloud.
-- v0.5.8 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.5.9 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.5.9: Adds detailed live Restic status including phase, elapsed time, current and average speed, ETA, current and recent files, last activity time, and captured backup errors.
 - v0.5.8: Adds Restic encrypted repositories, retention and integrity operations, encrypted cloud indexes, snapshot browsing, file and folder downloads, isolated NAS restores, `/vol2` source support, and full-fidelity defaults with no implicit exclusions.
 - v0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue is still reporting the active task. Completed file stats now display `同步完成` instead of staying on `同步中`.
 - v0.4.8: Adds decrypted folder downloads in Decrypt Browse. The app recursively lists encrypted pCloud folders, downloads `.pcenc` files, decrypts them locally with `/data/encryption.key`, and returns a zip with the original folder structure.

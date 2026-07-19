@@ -1,5 +1,5 @@
 appname=pcloud-nas-sync
-version=0.5.8
+version=0.5.9
 display_name=pCloud NAS Sync
 desc=Encrypted Restic backups from fnOS to pCloud with snapshot browsing, file download, folder ZIP, repository checks, retention, and isolated NAS restore.
 platform=all

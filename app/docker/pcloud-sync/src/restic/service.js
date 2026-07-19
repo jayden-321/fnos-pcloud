@@ -103,7 +103,10 @@ export class ResticService {
     const task = await this.task(taskId);
     return this.startJob('backup', task, async (update) => {
       const config = await this.config();
+      const progressState = { samples: [], recentFiles: [], recentErrors: [] };
+      update({ phase: 'checking-repository' });
       await this.ensureRepository(task, config);
+      update({ phase: 'backing-up' });
       const args = ['backup', task.localPath, '--json', '--tag', `task:${task.id}`, '--host', 'fnos-pcloud-nas-sync'];
       // Restic receives exclusions only from the user-facing configuration.
       // There is deliberately no implicit file-type or filename exclude list.
@@ -116,20 +119,21 @@ export class ResticService {
           const message = parseJson(line);
           if (!message) return;
           if (message.message_type === 'status') {
-            update({
-              percent: Math.round(Number(message.percent_done || 0) * 1000) / 10,
-              filesDone: Number(message.files_done || 0),
-              totalFiles: Number(message.total_files || 0),
-              bytesDone: Number(message.bytes_done || 0),
-              totalBytes: Number(message.total_bytes || 0)
-            });
+            update(backupProgressPatch(message, progressState, task.localPath));
           }
           if (message.message_type === 'summary') {
             snapshotId = message.snapshot_id || '';
             update({ snapshotId, summary: message });
           }
+        },
+        onStderrLine: (line) => {
+          const message = parseJson(line);
+          if (message?.message_type === 'error') {
+            update(backupErrorPatch(message, progressState, task.localPath));
+          }
         }
       });
+      update({ phase: 'retention' });
       await this.forget(task, config);
       let index = null;
       if (snapshotId && this.indexCatalog) {
@@ -365,6 +369,7 @@ export class ResticService {
       env,
       maxOutputBytes: options.maxOutputBytes || 64 * 1024 * 1024,
       onStdoutLine: options.onStdoutLine,
+      onStderrLine: options.onStderrLine,
       onChild: (child) => {
         if (this.job?.active) this.job.child = child;
       },
@@ -506,6 +511,7 @@ async function defaultRunCommand(command, args, options = {}) {
     let stdout = '';
     let stderr = '';
     let stdoutPending = '';
+    let stderrPending = '';
     child.stdout.on('data', (chunk) => {
       if (Buffer.byteLength(stdout) < max) stdout += chunk;
       if (options.onStdoutLine) {
@@ -517,10 +523,17 @@ async function defaultRunCommand(command, args, options = {}) {
     });
     child.stderr.on('data', (chunk) => {
       if (Buffer.byteLength(stderr) < max) stderr += chunk;
+      if (options.onStderrLine) {
+        stderrPending += chunk;
+        const lines = stderrPending.split(/\r?\n/);
+        stderrPending = lines.pop() || '';
+        for (const line of lines) options.onStderrLine(line);
+      }
     });
     child.on('error', reject);
     child.on('close', (code, signal) => {
       if (stdoutPending && options.onStdoutLine) options.onStdoutLine(stdoutPending);
+      if (stderrPending && options.onStderrLine) options.onStderrLine(stderrPending);
       const allowed = options.allowExitCodes || [0];
       if (allowed.includes(code)) return resolve({ code, stdout, stderr, signal });
       const error = new Error((stderr || stdout || `${command} exited with code ${code}`).trim());
@@ -580,6 +593,79 @@ function timestampForPath() {
 
 function parseJson(line) {
   try { return JSON.parse(String(line || '')); } catch { return null; }
+}
+
+function backupProgressPatch(message, state, sourcePath) {
+  const secondsElapsed = finiteNumber(message.seconds_elapsed);
+  const bytesDone = finiteNumber(message.bytes_done);
+  const filesDone = finiteNumber(message.files_done);
+  const currentFiles = unique(Array.isArray(message.current_files) ? message.current_files : [])
+    .map((item) => relativeBackupItem(item, sourcePath))
+    .filter(Boolean)
+    .slice(0, 12);
+  for (const item of currentFiles) {
+    state.recentFiles = [item, ...state.recentFiles.filter((value) => value !== item)].slice(0, 20);
+  }
+  if (!state.samples.length || state.samples.at(-1).secondsElapsed !== secondsElapsed) {
+    state.samples.push({ secondsElapsed, bytesDone, filesDone });
+    state.samples = state.samples.filter((sample) => sample.secondsElapsed >= secondsElapsed - 30);
+  } else {
+    state.samples[state.samples.length - 1] = { secondsElapsed, bytesDone, filesDone };
+  }
+  const baseline = state.samples.find((sample) => sample.secondsElapsed >= secondsElapsed - 15) || state.samples[0];
+  const sampleSeconds = Math.max(0, secondsElapsed - finiteNumber(baseline?.secondsElapsed));
+  const bytesPerSecond = sampleSeconds > 0 ? Math.max(0, bytesDone - finiteNumber(baseline?.bytesDone)) / sampleSeconds : 0;
+  const filesPerSecond = sampleSeconds > 0 ? Math.max(0, filesDone - finiteNumber(baseline?.filesDone)) / sampleSeconds : 0;
+  const resticRemaining = finiteNumber(message.seconds_remaining);
+  const totalBytes = finiteNumber(message.total_bytes);
+  const estimatedSecondsRemaining = resticRemaining > 0
+    ? resticRemaining
+    : bytesPerSecond > 0 ? Math.max(0, totalBytes - bytesDone) / bytesPerSecond : 0;
+  return {
+    percent: Math.round(finiteNumber(message.percent_done) * 1000) / 10,
+    filesDone,
+    totalFiles: finiteNumber(message.total_files),
+    bytesDone,
+    totalBytes,
+    secondsElapsed,
+    secondsRemaining: estimatedSecondsRemaining,
+    bytesPerSecond,
+    filesPerSecond,
+    averageBytesPerSecond: secondsElapsed > 0 ? bytesDone / secondsElapsed : 0,
+    errorCount: finiteNumber(message.error_count),
+    currentFiles,
+    recentFiles: [...state.recentFiles],
+    lastActivityAt: new Date().toISOString()
+  };
+}
+
+function backupErrorPatch(message, state, sourcePath) {
+  const detail = {
+    item: relativeBackupItem(message.item || '', sourcePath),
+    message: String(message.error?.message || message.message || 'Restic backup error'),
+    during: String(message.during || ''),
+    at: new Date().toISOString()
+  };
+  state.recentErrors = [detail, ...state.recentErrors].slice(0, 10);
+  return {
+    errorCount: Math.max(1, finiteNumber(message.error_count)),
+    recentErrors: structuredClone(state.recentErrors),
+    lastActivityAt: detail.at
+  };
+}
+
+function relativeBackupItem(value, sourcePath) {
+  const item = String(value || '').replaceAll('\\', '/');
+  const source = String(sourcePath || '').replaceAll('\\', '/').replace(/\/+$/, '');
+  if (!item) return '';
+  if (source && item === source) return path.posix.basename(source);
+  if (source && item.startsWith(`${source}/`)) return item.slice(source.length + 1);
+  return item;
+}
+
+function finiteNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function unique(values) {

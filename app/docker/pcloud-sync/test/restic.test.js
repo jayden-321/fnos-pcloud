@@ -37,7 +37,19 @@ test('ResticService initializes a repository, reports backup progress, and appli
     calls.push([command, args]);
     if (args.includes('snapshots') && probeCount++ === 0) return { code: 10, stdout: '', stderr: '' };
     if (args.includes('backup')) {
-      options.onStdoutLine?.(JSON.stringify({ message_type: 'status', percent_done: 0.5, files_done: 1, total_files: 2, bytes_done: 5, total_bytes: 10 }));
+      options.onStdoutLine?.(JSON.stringify({
+        message_type: 'status', seconds_elapsed: 5, seconds_remaining: 45,
+        percent_done: 0.125, files_done: 1, total_files: 4, bytes_done: 5, total_bytes: 40,
+        error_count: 0, current_files: ['alpha.txt']
+      }));
+      options.onStdoutLine?.(JSON.stringify({
+        message_type: 'status', seconds_elapsed: 20, seconds_remaining: 20,
+        percent_done: 0.5, files_done: 2, total_files: 4, bytes_done: 20, total_bytes: 40,
+        error_count: 0, current_files: ['beta.txt']
+      }));
+      options.onStderrLine?.(JSON.stringify({
+        message_type: 'error', item: 'broken.txt', during: 'archival', error: { message: 'read failed' }
+      }));
       options.onStdoutLine?.(JSON.stringify({ message_type: 'summary', snapshot_id: 'abcdef123456' }));
     }
     return { code: 0, stdout: '[]', stderr: '' };
@@ -50,6 +62,15 @@ test('ResticService initializes a repository, reports backup progress, and appli
   assert.equal(started.active, true);
   assert.equal(finished.active, false);
   assert.equal(finished.percent, 50);
+  assert.equal(finished.secondsElapsed, 20);
+  assert.equal(finished.secondsRemaining, 20);
+  assert.equal(finished.bytesPerSecond, 1);
+  assert.equal(finished.averageBytesPerSecond, 1);
+  assert.deepEqual(finished.currentFiles, ['beta.txt']);
+  assert.deepEqual(finished.recentFiles, ['beta.txt', 'alpha.txt']);
+  assert.equal(finished.errorCount, 1);
+  assert.deepEqual(finished.recentErrors.map((item) => [item.item, item.message]), [['broken.txt', 'read failed']]);
+  assert.equal(finished.phase, 'retention');
   assert.equal(finished.snapshotId, 'abcdef123456');
   assert.equal((await readFile(path.join(dataDir, 'restic', 'secrets', 'honvin.password'), 'utf8')).trim(), 'a-strong-test-password');
   assert.ok(calls.some(([, args]) => args.includes('init')));

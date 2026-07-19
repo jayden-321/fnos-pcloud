@@ -52,6 +52,7 @@ const resticControls = {
   rows: document.querySelector('#resticRows'),
   path: document.querySelector('#resticPath'),
   job: document.querySelector('#resticJob'),
+  jobDetails: document.querySelector('#resticJobDetails'),
   indexStatus: document.querySelector('#resticIndexStatus'),
   up: document.querySelector('#resticUp'),
   stop: document.querySelector('#resticStop')
@@ -980,6 +981,8 @@ function renderResticJob() {
   resticControls.stop.disabled = !job.active;
   if (!job.taskId) {
     resticControls.job.textContent = '未运行';
+    resticControls.jobDetails.hidden = true;
+    resticControls.jobDetails.innerHTML = '';
     return;
   }
   if (job.active) {
@@ -992,10 +995,54 @@ function renderResticJob() {
   } else {
     resticControls.job.textContent = `${job.taskName}：${job.result?.message || '操作完成'}`;
   }
+  renderResticJobDetails(job);
+}
+
+function renderResticJobDetails(job) {
+  const currentFiles = Array.isArray(job.currentFiles) ? job.currentFiles : [];
+  const recentFiles = Array.isArray(job.recentFiles) ? job.recentFiles : [];
+  const recentErrors = Array.isArray(job.recentErrors) ? job.recentErrors : [];
+  const fileRows = (currentFiles.length ? currentFiles : recentFiles.slice(0, 8));
+  resticControls.jobDetails.hidden = false;
+  resticControls.jobDetails.innerHTML = `
+    <div class="restic-progress-grid">
+      <span><strong>阶段</strong>${escapeHtml(resticPhaseText(job.phase, job.active))}</span>
+      <span><strong>已运行</strong>${escapeHtml(formatSeconds(job.secondsElapsed))}</span>
+      <span><strong>当前速度</strong>${escapeHtml(job.bytesPerSecond > 0 ? formatBytesPerSecond(job.bytesPerSecond) : '--')}</span>
+      <span><strong>平均速度</strong>${escapeHtml(job.averageBytesPerSecond > 0 ? formatBytesPerSecond(job.averageBytesPerSecond) : '--')}</span>
+      <span><strong>预计剩余</strong>${escapeHtml(job.secondsRemaining > 0 ? formatSeconds(job.secondsRemaining) : '--')}</span>
+      <span><strong>文件速度</strong>${escapeHtml(job.filesPerSecond > 0 ? `${Number(job.filesPerSecond).toFixed(2)} 个/秒` : '--')}</span>
+      <span><strong>错误</strong>${formatNumber(job.errorCount || 0)}</span>
+      <span><strong>最后活动</strong>${escapeHtml(formatDateTime(job.lastActivityAt) || '--')}</span>
+    </div>
+    <div class="restic-live-files">
+      <strong>${currentFiles.length ? '当前处理文件' : '最近活动文件'}</strong>
+      ${fileRows.length
+        ? `<ul>${fileRows.map((item) => `<li title="${escapeHtml(item)}">${escapeHtml(item)}</li>`).join('')}</ul>`
+        : '<p class="field-note">等待 Restic 返回文件明细</p>'}
+    </div>
+    ${recentErrors.length ? `
+      <div class="restic-live-errors">
+        <strong>最近错误</strong>
+        <ul>${recentErrors.map((item) => `<li>${escapeHtml(item.item || '未知文件')}：${escapeHtml(item.message || '未知错误')}</li>`).join('')}</ul>
+      </div>` : ''}
+  `;
 }
 
 function resticActionText(action) {
   return { backup: '备份中', check: '检查中', prune: '清理中', index: '建立并上传索引中' }[action] || action || '处理中';
+}
+
+function resticPhaseText(phase, active) {
+  return {
+    preparing: '准备任务',
+    'checking-repository': '检查仓库',
+    'backing-up': '扫描并上传',
+    retention: '应用保留策略',
+    indexing: '生成目录索引',
+    'publishing-index': '上传加密索引',
+    complete: '完成'
+  }[phase] || (active ? '处理中' : '已结束');
 }
 
 function resticIndexStatusText(index = {}) {
@@ -1112,6 +1159,21 @@ function formatDuration(ms) {
     return `${Math.max(0, Math.round(value))}ms`;
   }
   return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`;
+}
+
+function formatSeconds(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds || 0)));
+  if (!value) return '0 秒';
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const remainingSeconds = value % 60;
+  return [
+    days ? `${days} 天` : '',
+    hours ? `${hours} 小时` : '',
+    minutes ? `${minutes} 分` : '',
+    !days && !hours && remainingSeconds ? `${remainingSeconds} 秒` : ''
+  ].filter(Boolean).join(' ');
 }
 
 async function get(url) {

@@ -72,6 +72,7 @@ test('web UI exposes Restic snapshot browse, download, zip, and restore actions'
   assert.match(html, /id="resticRestore"/);
   assert.match(html, /id="resticRebuildIndex"/);
   assert.match(html, /id="resticIndexStatus"/);
+  assert.match(html, /id="resticJobDetails"/);
   assert.match(script, /loadResticSnapshots/);
   assert.match(script, /\/api\/restic\/browse/);
   assert.match(script, /\/api\/restic\/download/);
@@ -79,6 +80,12 @@ test('web UI exposes Restic snapshot browse, download, zip, and restore actions'
   assert.match(script, /\/api\/restic\/index\/rebuild/);
   assert.match(script, /window\.open\(url, '_blank', 'noopener'\)/);
   assert.match(script, /恢复信息已生成，请查看浏览器下载记录或新窗口/);
+  assert.match(script, /当前处理文件/);
+  assert.match(script, /当前速度/);
+  assert.match(script, /平均速度/);
+  assert.match(script, /预计剩余/);
+  assert.match(script, /最后活动/);
+  assert.match(script, /recentErrors/);
 });
 
 test('settings exposes pCloud upload and download speed test controls', async () => {
