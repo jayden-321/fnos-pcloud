@@ -108,7 +108,7 @@ export class SyncEngine {
 
   async refreshWatchers(config = null) {
     const normalized = config ?? normalizeConfig(await this.store.loadConfig() ?? {});
-    const enabledTasks = normalized.tasks.filter((task) => task.enabled);
+    const enabledTasks = normalized.tasks.filter((task) => task.enabled && task.mode === 'upload');
     const taskPaths = new Map(enabledTasks.map((task) => [task.id, path.resolve(task.localPath)]));
 
     for (const [taskId, entry] of this.watchers) {
@@ -259,7 +259,7 @@ export class SyncEngine {
       const known = await this.store.fileMap();
       const requestedTaskIds = normalizeTaskIds(options.taskIds);
       const tasks = config.tasks
-        .filter((item) => item.enabled)
+        .filter((item) => item.enabled && item.mode === 'upload')
         .filter((item) => requestedTaskIds.length === 0 || requestedTaskIds.includes(item.id));
       this.clearQueuedChangesForTasks(requestedTaskIds.length > 0 ? requestedTaskIds : null);
       if (tasks.length === 0) {
@@ -503,7 +503,7 @@ export class SyncEngine {
     }
     const config = normalizeConfig(await this.store.loadConfig() ?? {});
     await this.flushLocalChanges(config);
-    const dueTasks = config.tasks.filter((task) => task.enabled && taskIsDue(task, config.sync, now, this.scheduleSlots));
+    const dueTasks = config.tasks.filter((task) => task.enabled && task.mode === 'upload' && taskIsDue(task, config.sync, now, this.scheduleSlots));
     if (dueTasks.length === 0) {
       return 0;
     }

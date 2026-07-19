@@ -11,7 +11,7 @@
       <nav>
         <button class="nav-item active" data-tab="tasks" type="button">同步任务</button>
         <button class="nav-item" data-tab="logs" type="button">同步日志</button>
-        <button class="nav-item" data-tab="decrypt" type="button">解密浏览</button>
+        <button class="nav-item" data-tab="restic" type="button">Restic 仓库</button>
         <button class="nav-item" data-tab="settings" type="button">设置</button>
       </nav>
       <button id="createTask" class="create-task" type="button">＋ 创建新任务</button>
@@ -40,13 +40,15 @@
           <div><span id="statFailed">0</span><small>失败</small></div>
           <div><span id="statPending">0</span><small>待上传</small></div>
           <div><span id="statUploading">0</span><small>上传中</small></div>
-          <div><span id="statSpeed">0 B/s</span><small>上传速度</small></div>
         </section>
 
         <section id="taskCards" class="task-list" aria-label="同步任务"></section>
 
         <section class="panel">
-          <h3>队列状态</h3>
+          <div class="panel-title-row">
+            <h3>队列状态</h3>
+            <button id="clearQueue" type="button">清理队列</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -94,28 +96,40 @@
         </section>
       </section>
 
-      <section id="decryptPanel" class="tab-panel" data-panel="decrypt" hidden>
+      <section id="resticPanel" class="tab-panel" data-panel="restic" hidden>
         <section class="panel">
           <div class="panel-title">
-            <h3>解密浏览</h3>
+            <div>
+              <h3>Restic 加密仓库</h3>
+              <small class="field-note">这里显示解密后的快照和文件名；pCloud 中保存的仍是加密 pack。</small>
+            </div>
             <div class="row">
-              <button id="decryptUp" type="button">上一级</button>
-              <button id="decryptRefresh" type="button">刷新</button>
+              <select id="resticTask" aria-label="Restic 任务"></select>
+              <button id="resticRefresh" type="button">刷新快照</button>
+              <button id="resticRebuildIndex" type="button">更新云端索引</button>
+              <button id="resticBackup" type="button">立即备份</button>
+              <button id="resticCheck" type="button">检查仓库</button>
+              <button id="resticStop" type="button" disabled>停止</button>
             </div>
           </div>
-          <div id="decryptPath" class="folder-path">/</div>
+          <div id="resticJob" class="folder-path">未运行</div>
+          <div id="resticIndexStatus" class="folder-path">目录索引：尚未建立</div>
+          <div class="restic-browser-toolbar">
+            <label>快照 <select id="resticSnapshot"></select></label>
+            <button id="resticUp" type="button">上一级</button>
+            <button id="resticRestore" type="button">恢复当前目录到 NAS</button>
+            <button id="resticDownloadFolder" type="button">ZIP 下载当前目录</button>
+          </div>
+          <div id="resticPath" class="folder-path">/</div>
           <div class="table-wrap">
             <table class="decrypt-table">
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>类型</th>
-                  <th>大小</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="decryptRows"></tbody>
+              <thead><tr><th>名称</th><th>类型</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead>
+              <tbody id="resticRows"><tr><td colspan="5" class="empty">请选择 Restic 任务和快照</td></tr></tbody>
             </table>
+          </div>
+          <div class="row restic-danger-row">
+            <button id="resticExportRecovery" type="button">导出恢复信息</button>
+            <button id="resticPrune" class="danger-button" type="button">清理未引用数据（Prune）</button>
           </div>
         </section>
       </section>
@@ -192,15 +206,6 @@
               <input name="mtimeVerifyConcurrency" type="number" min="1" max="10" step="1">
               <small class="field-note">用于“全部校验时间不同文件”；默认 3，文件很多时可提高，过高可能触发 pCloud 限流。</small>
             </label>
-            <label class="inline-check">
-              <input name="encryptionEnabled" type="checkbox">
-              上传前加密文件内容
-            </label>
-            <small class="field-note">开启后会在本机数据目录保存加密密钥，远端文件以 .pcenc 密文形式上传；请备份该密钥。</small>
-            <div class="row">
-              <button id="exportEncryptionKey" type="button">导出加密密钥</button>
-            </div>
-            <small class="field-note">下载当前 /data/encryption.key；请离线保存，不要分享给别人。</small>
             <label>
               定时任务时区
               <input name="timezone" autocomplete="off" placeholder="例如 Asia/Shanghai">

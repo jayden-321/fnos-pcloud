@@ -35,3 +35,11 @@ test('taskStatusText treats pending, uploading, and failed files as syncing work
     assert.equal(taskStatusText({ stats: { total: 0 }, counts }), '同步中');
   }
 });
+
+test('taskStatusText treats a syncing queue with completed file stats as complete', () => {
+  assert.equal(taskStatusText({
+    queue: { status: 'syncing' },
+    stats: { total: 57764, synced: 57764, existing: 0, failed: 0, pending: 0, uploading: 0 },
+    counts: { failed: 0, pending: 0, uploading: 0 }
+  }), '同步完成');
+});

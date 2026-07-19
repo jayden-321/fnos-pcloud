@@ -10,7 +10,9 @@ const DEFAULT_CONFIG = {
   sync: {
     intervalSeconds: 300,
     concurrency: 2,
-    ignorePatterns: ['.DS_Store', 'Thumbs.db', '*.tmp', '*.part', '~$*'],
+    // Backups are full-fidelity by default. Exclusions are opt-in and must be
+    // supplied explicitly by the user.
+    ignorePatterns: [],
     logRetentionDays: 30,
     logRetentionCount: 300,
     renameIfExists: false,
@@ -188,7 +190,8 @@ function normalizeTasks(input, legacySources, remoteRoot) {
       enabled: item?.enabled !== false,
       localPath,
       remotePath: cleanRemoteRoot(item?.remotePath || joinRemote(item?.remoteName || fallbackName)),
-      mode: 'upload',
+      mode: normalizeTaskMode(item?.mode),
+      ...(normalizeTaskMode(item?.mode) === 'restic' ? { restic: normalizeRestic(item?.restic) } : {}),
       ...schedulePatch(item?.schedule)
     });
   }
@@ -196,12 +199,27 @@ function normalizeTasks(input, legacySources, remoteRoot) {
 }
 
 function tasksToSources(tasks, remoteRoot) {
-  return tasks.map((task) => ({
+  return tasks.filter((task) => task.mode === 'upload').map((task) => ({
     id: task.id,
     path: task.localPath,
     enabled: task.enabled,
     remoteName: remoteNameFromPath(task.remotePath, remoteRoot)
   }));
+}
+
+function normalizeTaskMode(value) {
+  return String(value || 'upload').trim() === 'restic' ? 'restic' : 'upload';
+}
+
+function normalizeRestic(input = {}) {
+  return {
+    keepDaily: clampInteger(input.keepDaily, 7, 0, 3650),
+    keepWeekly: clampInteger(input.keepWeekly, 4, 0, 520),
+    keepMonthly: clampInteger(input.keepMonthly, 12, 0, 1200),
+    compression: ['auto', 'off', 'max'].includes(String(input.compression || 'auto'))
+      ? String(input.compression || 'auto')
+      : 'auto'
+  };
 }
 
 function normalizeIgnorePatterns(input) {

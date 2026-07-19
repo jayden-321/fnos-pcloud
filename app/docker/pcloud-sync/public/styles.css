@@ -151,7 +151,7 @@ dt {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(7, minmax(108px, 1fr));
+  grid-template-columns: repeat(6, minmax(108px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -427,6 +427,17 @@ td:first-child {
   width: 92px;
 }
 
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-title-row h3 {
+  margin: 0;
+}
+
 .log-panel {
   padding: 0;
   overflow: hidden;
@@ -519,7 +530,7 @@ td:first-child {
 
 .decrypt-table th:nth-child(2) { width: 110px; }
 .decrypt-table th:nth-child(3) { width: 120px; }
-.decrypt-table th:nth-child(4) { width: 100px; }
+.decrypt-table th:nth-child(4) { width: 160px; }
 
 .button-link {
   display: inline-flex;
@@ -594,6 +605,44 @@ dialog::backdrop {
 .resolution-actions button {
   min-height: 30px;
   padding: 0 10px;
+}
+
+.three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.restic-task-options {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.restic-browser-toolbar,
+.restic-danger-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.restic-browser-toolbar label {
+  min-width: min(480px, 100%);
+}
+
+.danger-button {
+  color: #991b1b;
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.restic-danger-row {
+  justify-content: flex-end;
 }
 
 .folder-path {
@@ -682,6 +731,10 @@ dialog::backdrop {
 
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .three {
+    grid-template-columns: 1fr;
   }
 
   .task-card-main {

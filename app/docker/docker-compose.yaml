@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       DATA_DIR: /data
+      RESTIC_RESTORE_ROOT: /restore
       PORT: 8080
       NODE_ENV: production
     # fnOS launches iframe apps through the NAS LAN address and this published
@@ -19,3 +20,5 @@ services:
     volumes:
       - "${TRIM_PKGVAR:-./data}:/data"
       - "/vol1:/vol1:ro"
+      - "/vol2:/vol2:ro"
+      - "${RESTIC_RESTORE_DIR:-/vol1/1000/pcloudbackups/restic-restore}:/restore"

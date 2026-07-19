@@ -13,11 +13,14 @@ let currentStatus = null;
 let currentEvents = [];
 let folderPicker = null;
 
-const decryptBrowser = {
-  path: '/',
-  parent: '/',
-  loaded: false,
-  entries: []
+const resticBrowser = {
+  taskId: '',
+  snapshot: '',
+  path: '',
+  parent: null,
+  entries: [],
+  snapshots: [],
+  indexSnapshotId: ''
 };
 
 const fields = {
@@ -31,7 +34,6 @@ const fields = {
   checksumMode: form.elements.checksumMode,
   checksumSamplePercent: form.elements.checksumSamplePercent,
   mtimeVerifyConcurrency: form.elements.mtimeVerifyConcurrency,
-  encryptionEnabled: form.elements.encryptionEnabled,
   timezone: form.elements.timezone,
   logRetentionDays: form.elements.logRetentionDays,
   logRetentionCount: form.elements.logRetentionCount,
@@ -44,11 +46,15 @@ const eventFilters = {
   search: document.querySelector('#eventSearch')
 };
 
-const decryptControls = {
-  path: document.querySelector('#decryptPath'),
-  rows: document.querySelector('#decryptRows'),
-  up: document.querySelector('#decryptUp'),
-  refresh: document.querySelector('#decryptRefresh')
+const resticControls = {
+  task: document.querySelector('#resticTask'),
+  snapshot: document.querySelector('#resticSnapshot'),
+  rows: document.querySelector('#resticRows'),
+  path: document.querySelector('#resticPath'),
+  job: document.querySelector('#resticJob'),
+  indexStatus: document.querySelector('#resticIndexStatus'),
+  up: document.querySelector('#resticUp'),
+  stop: document.querySelector('#resticStop')
 };
 
 for (const control of Object.values(eventFilters)) {
@@ -105,6 +111,13 @@ document.querySelector('#retryFailed').addEventListener('click', async () => {
   show(`${result.queued} 个已入队，${result.uploaded || 0} 个已上传，${result.failed || 0} 个失败`);
 });
 
+document.querySelector('#clearQueue').addEventListener('click', async () => {
+  if (!window.confirm('只清理旧的队列状态记录，不会删除 NAS 或 pCloud 文件。确定继续？')) return;
+  const result = await del('/api/queue');
+  await refreshStatus();
+  show(`已清理 ${result.deleted} 条队列记录`);
+});
+
 document.querySelector('#startSpeedTest').addEventListener('click', async () => {
   const sizeMb = Number(document.querySelector('#speedTestSize').value || 50);
   const result = await post('/api/speed-test', { sizeMb });
@@ -133,8 +146,6 @@ document.querySelector('#testPcloud').addEventListener('click', async () => {
   show(`连接成功：${result.email || result.userid || 'pCloud'}`);
 });
 
-document.querySelector('#exportEncryptionKey').addEventListener('click', exportEncryptionKey);
-
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   await saveConfig();
@@ -160,6 +171,16 @@ taskEditors.addEventListener('click', async (event) => {
   }
   if (action === 'pick-remote') {
     await openFolderPicker({ kind: 'remote', index, initialPath: editor.querySelector('[name="remotePath"]').value });
+  }
+  if (action === 'set-restic-password') {
+    await saveConfig();
+    const refreshed = taskEditors.querySelector(`.task-editor[data-index="${index}"]`);
+    const taskId = refreshed.querySelector('[name="id"]').value;
+    const password = refreshed.querySelector('[name="resticPassword"]').value;
+    await post('/api/restic/password', { taskId, password });
+    refreshed.querySelector('[name="resticPassword"]').value = '';
+    await refreshStatus();
+    show('Restic 密码已安全保存');
   }
 });
 
@@ -195,19 +216,55 @@ document.querySelector('#folderEntries').addEventListener('click', async (event)
   }
 });
 
-decryptControls.up.addEventListener('click', async () => {
-  await loadDecryptFolder(decryptBrowser.parent || '/');
+resticControls.task.addEventListener('change', async () => {
+  resticBrowser.taskId = resticControls.task.value;
+  resticBrowser.path = '';
+  resticBrowser.indexSnapshotId = '';
+  await loadResticSnapshots();
 });
-
-decryptControls.refresh.addEventListener('click', async () => {
-  await loadDecryptFolder(decryptBrowser.path || '/');
+resticControls.snapshot.addEventListener('change', async () => {
+  resticBrowser.snapshot = resticControls.snapshot.value;
+  resticBrowser.path = '';
+  await loadResticFolder('');
 });
-
-decryptControls.rows.addEventListener('click', async (event) => {
-  const button = event.target.closest('button[data-decrypt-folder]');
-  if (button) {
-    await loadDecryptFolder(button.dataset.decryptFolder || '/');
-  }
+document.querySelector('#resticRefresh').addEventListener('click', loadResticSnapshots);
+document.querySelector('#resticRebuildIndex').addEventListener('click', async () => {
+  if (!resticBrowser.taskId) return show('请先选择 Restic 任务');
+  await post('/api/restic/index/rebuild', { taskId: resticBrowser.taskId, snapshot: resticBrowser.snapshot || '' });
+  await refreshStatus();
+  show('目录索引建立和加密上传已开始');
+});
+document.querySelector('#resticBackup').addEventListener('click', async () => runResticAction('/api/restic/backup', '备份已开始'));
+document.querySelector('#resticCheck').addEventListener('click', async () => runResticAction('/api/restic/check', '仓库检查已开始'));
+document.querySelector('#resticStop').addEventListener('click', async () => {
+  await post('/api/restic/stop', {});
+  await refreshStatus();
+  show('正在停止 Restic 操作');
+});
+document.querySelector('#resticPrune').addEventListener('click', async () => {
+  if (!window.confirm('Prune 会删除已不被快照引用的数据并产生较多 pCloud 读写，确定继续？')) return;
+  await runResticAction('/api/restic/prune', 'Prune 已开始');
+});
+resticControls.up.addEventListener('click', async () => loadResticFolder(resticBrowser.parent || ''));
+document.querySelector('#resticRestore').addEventListener('click', async () => {
+  if (!resticBrowser.taskId || !resticBrowser.snapshot) return;
+  if (!window.confirm(`恢复“/${resticBrowser.path}”到 NAS 专用恢复目录？不会覆盖原文件。`)) return;
+  const result = await post('/api/restic/restore', resticSelectionBody(resticBrowser.path));
+  show(`已恢复到 ${result.destination}`);
+});
+document.querySelector('#resticDownloadFolder').addEventListener('click', () => {
+  if (!resticBrowser.path) return show('仓库根目录请使用“恢复到 NAS”，或进入一个文件夹后下载');
+  window.location.href = resticDownloadUrl(resticBrowser.path, true);
+});
+document.querySelector('#resticExportRecovery').addEventListener('click', () => {
+  if (!resticBrowser.taskId) return show('请先选择 Restic 任务');
+  const url = `/api/restic/recovery?taskId=${encodeURIComponent(resticBrowser.taskId)}`;
+  window.open(url, '_blank', 'noopener');
+  show('恢复信息已生成，请查看浏览器下载记录或新窗口');
+});
+resticControls.rows.addEventListener('click', async (event) => {
+  const button = event.target.closest('button[data-restic-folder]');
+  if (button) await loadResticFolder(button.dataset.resticFolder || '');
 });
 
 await loadConfig();
@@ -226,7 +283,6 @@ async function loadConfig() {
   fields.checksumMode.value = currentConfig.sync.checksumMode || 'failed';
   fields.checksumSamplePercent.value = currentConfig.sync.checksumSamplePercent ?? 5;
   fields.mtimeVerifyConcurrency.value = currentConfig.sync.mtimeVerifyConcurrency ?? 3;
-  fields.encryptionEnabled.checked = currentConfig.sync.encryption?.enabled === true;
   fields.timezone.value = scheduleTimezoneValue(currentConfig.sync.timezone);
   fields.logRetentionDays.value = currentConfig.sync.logRetentionDays;
   fields.logRetentionCount.value = currentConfig.sync.logRetentionCount;
@@ -257,9 +313,7 @@ async function saveConfig() {
       checksumMode: fields.checksumMode.value,
       checksumSamplePercent: Number(fields.checksumSamplePercent.value),
       mtimeVerifyConcurrency: Number(fields.mtimeVerifyConcurrency.value),
-      encryption: {
-        enabled: fields.encryptionEnabled.checked
-      },
+      encryption: { enabled: false },
       timezone: fields.timezone.value.trim(),
       logRetentionDays: Number(fields.logRetentionDays.value),
       logRetentionCount: Number(fields.logRetentionCount.value),
@@ -267,37 +321,6 @@ async function saveConfig() {
     }
   });
   renderTaskEditors(currentConfig.tasks || []);
-}
-
-async function exportEncryptionKey() {
-  const button = document.querySelector('#exportEncryptionKey');
-  button.disabled = true;
-  try {
-    const response = await fetch('/api/encryption/key');
-    if (!response.ok) {
-      let message = response.statusText;
-      try {
-        const body = await response.json();
-        message = body.error || message;
-      } catch {
-        // Ignore non-JSON error bodies from interrupted downloads.
-      }
-      throw new Error(message);
-    }
-    const objectUrl = URL.createObjectURL(await response.blob());
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = 'encryption.key';
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    show('加密密钥已导出');
-  } catch (error) {
-    show(error.message);
-  } finally {
-    button.disabled = false;
-  }
 }
 
 async function refreshStatus() {
@@ -313,7 +336,6 @@ async function refreshStatus() {
   setText('statFailed', displayedStats.failed);
   setText('statPending', displayedStats.pending);
   setText('statUploading', displayedStats.uploading);
-  setText('statSpeed', formatBytesPerSecond(currentStatus.engine?.uploadSpeedBytesPerSecond || 0));
   document.querySelector('#stopSync').disabled = !currentStatus.engine?.active && !currentStatus.stats.uploading;
   renderSpeedTest(currentStatus.engine?.speedTest);
   currentEvents = currentStatus.events || [];
@@ -330,6 +352,13 @@ async function refreshStatus() {
   updateTaskOptions(currentLogRows());
   renderEvents();
   renderTaskCards();
+  renderResticJob();
+  updateResticTaskOptions();
+  const index = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId)?.index;
+  if (index?.status === 'ready' && index.activeSnapshotId && index.activeSnapshotId !== resticBrowser.indexSnapshotId) {
+    resticBrowser.indexSnapshotId = index.activeSnapshotId;
+    if (resticBrowser.snapshots.length) loadResticSnapshots().catch((error) => show(error.message));
+  }
 }
 
 function showTab(tab) {
@@ -339,10 +368,11 @@ function showTab(tab) {
   for (const panel of document.querySelectorAll('[data-panel]')) {
     panel.hidden = panel.dataset.panel !== tab;
   }
-  const title = { tasks: '同步任务', logs: '同步日志', decrypt: '解密浏览', settings: '设置' }[tab] || '同步任务';
+  const title = { tasks: '同步任务', logs: '同步日志', restic: 'Restic 仓库', settings: '设置' }[tab] || '同步任务';
   setText('pageTitle', title);
-  if (tab === 'decrypt' && !decryptBrowser.loaded) {
-    loadDecryptFolder(decryptBrowser.path || '/').catch((error) => show(error.message));
+  if (tab === 'restic') {
+    updateResticTaskOptions();
+    if (resticBrowser.taskId && !resticBrowser.snapshots.length) loadResticSnapshots().catch((error) => show(error.message));
   }
 }
 
@@ -351,6 +381,7 @@ function renderTaskCards() {
   const statsByTask = taskStatsById();
   const queueByTask = new Map((currentStatus?.engine?.taskQueue || []).map((task) => [task.id, task]));
   taskCards.innerHTML = tasks.map((task) => {
+    if (task.mode === 'restic') return renderResticTaskCard(task);
     const counts = taskQueueCounts(task.id);
     const queue = queueByTask.get(task.id);
     const taskStats = statsByTask.get(task.id) || {};
@@ -399,6 +430,33 @@ function renderTaskCards() {
       <button type="button" data-tab="settings">去设置</button>
     </section>
   `;
+}
+
+function renderResticTaskCard(task) {
+  const resticTask = (currentStatus?.resticTasks || []).find((item) => item.taskId === task.id);
+  const password = resticTask?.passwordConfigured;
+  const active = currentStatus?.restic?.active && currentStatus.restic.taskId === task.id;
+  const status = active
+    ? `${resticActionText(currentStatus.restic.action)} ${currentStatus.restic.percent || 0}%`
+    : currentStatus?.restic?.taskId === task.id && currentStatus.restic.error
+      ? `失败：${currentStatus.restic.error}`
+      : password ? '已就绪' : '需要设置 Restic 密码';
+  return `
+    <article class="task-card">
+      <div class="task-card-main">
+        <div class="task-card-copy">
+          <h3>${escapeHtml(task.name)} <small>Restic</small></h3>
+          <p class="${password ? 'success' : 'danger'}">${escapeHtml(status)}</p>
+          <p class="task-scan-detail">${escapeHtml(task.localPath)} → ${escapeHtml(task.remotePath)}</p>
+          <p class="task-scan-detail">目录索引：${escapeHtml(resticIndexStatusText(resticTask?.index))}</p>
+          <div class="task-stat-grid"><span>日 ${task.restic?.keepDaily ?? 7}</span><span>周 ${task.restic?.keepWeekly ?? 4}</span><span>月 ${task.restic?.keepMonthly ?? 12}</span></div>
+        </div>
+        <div class="task-card-actions">
+          <button type="button" data-tab="restic">浏览仓库</button>
+          <button type="button" data-tab="settings">编辑</button>
+        </div>
+      </div>
+    </article>`;
 }
 
 async function runScan({ forceRemoteScan = false } = {}) {
@@ -595,6 +653,13 @@ function addTaskEditor(task = {}) {
       <input name="name" value="${escapeHtml(task.name || '')}" placeholder="例如 财务备份">
     </label>
     <label>
+      任务模式
+      <select name="mode">
+        <option value="restic" ${task.mode === 'restic' ? 'selected' : ''}>Restic 加密备份（推荐）</option>
+        <option value="upload" ${task.mode !== 'restic' ? 'selected' : ''}>传统逐文件同步</option>
+      </select>
+    </label>
+    <label>
       本地文件夹
       <div class="input-action">
         <input name="localPath" value="${escapeHtml(task.localPath || '')}" placeholder="/vol1/1000/work">
@@ -608,6 +673,27 @@ function addTaskEditor(task = {}) {
         <button data-action="pick-remote" type="button">选择</button>
       </div>
     </label>
+    <section class="restic-task-options" data-restic-options>
+      <div class="three">
+        <label>保留日快照<input name="keepDaily" type="number" min="0" max="3650" value="${escapeHtml(String(task.restic?.keepDaily ?? 7))}"></label>
+        <label>保留周快照<input name="keepWeekly" type="number" min="0" max="520" value="${escapeHtml(String(task.restic?.keepWeekly ?? 4))}"></label>
+        <label>保留月快照<input name="keepMonthly" type="number" min="0" max="1200" value="${escapeHtml(String(task.restic?.keepMonthly ?? 12))}"></label>
+      </div>
+      <label>压缩级别
+        <select name="resticCompression">
+          <option value="auto" ${task.restic?.compression !== 'off' && task.restic?.compression !== 'max' ? 'selected' : ''}>自动</option>
+          <option value="max" ${task.restic?.compression === 'max' ? 'selected' : ''}>最大压缩</option>
+          <option value="off" ${task.restic?.compression === 'off' ? 'selected' : ''}>关闭</option>
+        </select>
+      </label>
+      <label>Restic 密码
+        <div class="input-action">
+          <input name="resticPassword" type="password" autocomplete="new-password" placeholder="至少 12 个字符；留空不会修改">
+          <button data-action="set-restic-password" type="button">保存密码</button>
+        </div>
+      </label>
+      <small class="field-note">密码不写入任务配置。丢失密码将无法恢复备份，请在 Restic 仓库页导出恢复信息并离线保存。</small>
+    </section>
     <div class="schedule-grid">
       <label>
         定时方式
@@ -637,21 +723,35 @@ function addTaskEditor(task = {}) {
   `;
   taskEditors.append(editor);
   editor.querySelector('[name="scheduleType"]').addEventListener('change', () => updateScheduleVisibility(editor));
+  editor.querySelector('[name="mode"]').addEventListener('change', () => updateTaskModeVisibility(editor));
   updateScheduleVisibility(editor);
+  updateTaskModeVisibility(editor);
 }
 
 function collectTaskEditors() {
   return [...taskEditors.querySelectorAll('.task-editor')]
-    .map((editor) => ({
+    .map((editor) => {
+      const mode = editor.querySelector('[name="mode"]').value;
+      return ({
       id: editor.querySelector('[name="id"]').value,
       name: editor.querySelector('[name="name"]').value.trim(),
       localPath: editor.querySelector('[name="localPath"]').value.trim(),
       remotePath: editor.querySelector('[name="remotePath"]').value.trim(),
       enabled: editor.querySelector('[name="enabled"]').checked,
-      mode: 'upload',
+      mode,
+      ...(mode === 'restic' ? { restic: {
+        keepDaily: Number(editor.querySelector('[name="keepDaily"]').value),
+        keepWeekly: Number(editor.querySelector('[name="keepWeekly"]').value),
+        keepMonthly: Number(editor.querySelector('[name="keepMonthly"]').value),
+        compression: editor.querySelector('[name="resticCompression"]').value
+      } } : {}),
       schedule: collectSchedule(editor)
-    }))
+    }); })
     .filter((task) => task.name || task.localPath || task.remotePath);
+}
+
+function updateTaskModeVisibility(editor) {
+  editor.querySelector('[data-restic-options]').hidden = editor.querySelector('[name="mode"]').value !== 'restic';
 }
 
 function taskStatsById() {
@@ -800,52 +900,111 @@ async function loadFolder(targetPath) {
   `).join('') || '<li class="empty">没有子文件夹</li>';
 }
 
-async function loadDecryptFolder(remotePath = '/') {
-  decryptBrowser.loaded = true;
-  decryptControls.up.disabled = true;
-  decryptControls.rows.innerHTML = '<tr><td colspan="4" class="empty">加载中</td></tr>';
-  try {
-    const result = await get(`/api/encryption/browse?path=${encodeURIComponent(remotePath || '/')}`);
-    decryptBrowser.path = result.path || '/';
-    decryptBrowser.parent = result.parent || '/';
-    decryptBrowser.entries = result.entries || [];
-    renderDecryptBrowser();
-  } catch (error) {
-    decryptControls.rows.innerHTML = `<tr><td colspan="4" class="danger">${escapeHtml(error.message)}</td></tr>`;
-    show(error.message);
+function updateResticTaskOptions() {
+  const tasks = (currentConfig?.tasks || currentStatus?.tasks || []).filter((task) => task.mode === 'restic');
+  const selected = resticBrowser.taskId || resticControls.task.value;
+  resticControls.task.innerHTML = tasks.length
+    ? tasks.map((task) => `<option value="${escapeHtml(task.id)}">${escapeHtml(task.name)}</option>`).join('')
+    : '<option value="">没有 Restic 任务</option>';
+  resticBrowser.taskId = tasks.some((task) => task.id === selected) ? selected : tasks[0]?.id || '';
+  resticControls.task.value = resticBrowser.taskId;
+}
+
+async function loadResticSnapshots() {
+  updateResticTaskOptions();
+  if (!resticBrowser.taskId) return;
+  const body = await get(`/api/restic/snapshots?taskId=${encodeURIComponent(resticBrowser.taskId)}`);
+  resticBrowser.snapshots = body.snapshots || [];
+  const index = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId)?.index;
+  if (index?.activeSnapshotId) resticBrowser.indexSnapshotId = index.activeSnapshotId;
+  resticControls.snapshot.innerHTML = resticBrowser.snapshots.map((snapshot) => `
+    <option value="${escapeHtml(snapshot.id)}">${escapeHtml(formatDateTime(snapshot.time))} · ${escapeHtml(snapshot.shortId)}</option>
+  `).join('') || '<option value="">暂无快照</option>';
+  resticBrowser.snapshot = resticBrowser.snapshots.some((item) => item.id === resticBrowser.snapshot)
+    ? resticBrowser.snapshot
+    : resticBrowser.snapshots[0]?.id || '';
+  resticControls.snapshot.value = resticBrowser.snapshot;
+  resticBrowser.path = '';
+  if (resticBrowser.snapshot) await loadResticFolder('');
+  else resticControls.rows.innerHTML = '<tr><td colspan="5" class="empty">暂无快照，请先运行备份</td></tr>';
+}
+
+async function loadResticFolder(relativePath = '') {
+  if (!resticBrowser.taskId || !resticBrowser.snapshot) return;
+  resticControls.rows.innerHTML = '<tr><td colspan="5" class="empty">正在读取目录索引</td></tr>';
+  const query = new URLSearchParams({
+    taskId: resticBrowser.taskId,
+    snapshot: resticBrowser.snapshot,
+    path: relativePath
+  });
+  const body = await get(`/api/restic/browse?${query}`);
+  resticBrowser.path = body.path || '';
+  resticBrowser.parent = body.parent;
+  resticBrowser.entries = body.entries || [];
+  resticControls.path.textContent = `/${resticBrowser.path}`;
+  resticControls.up.disabled = body.parent === null;
+  document.querySelector('#resticDownloadFolder').disabled = !resticBrowser.path;
+  resticControls.rows.innerHTML = resticBrowser.entries.map((entry) => {
+    const actions = entry.type === 'folder'
+      ? `<button type="button" data-restic-folder="${escapeHtml(entry.path)}">打开</button><a class="button-link" href="${resticDownloadUrl(entry.path, true)}">ZIP 下载</a>`
+      : `<a class="button-link" href="${resticDownloadUrl(entry.path, false)}">下载</a>`;
+    return `<tr><td>${escapeHtml(entry.name)}</td><td>${entry.type === 'folder' ? '文件夹' : '文件'}</td><td>${entry.type === 'folder' ? '--' : escapeHtml(formatBytes(entry.size))}</td><td>${escapeHtml(formatDateTime(entry.mtime))}</td><td><div class="resolution-actions">${actions}</div></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">这个目录为空</td></tr>';
+}
+
+function resticDownloadUrl(relativePath, zip) {
+  const query = new URLSearchParams({
+    taskId: resticBrowser.taskId,
+    snapshot: resticBrowser.snapshot,
+    path: relativePath
+  });
+  if (zip) query.set('zip', '1');
+  return `/api/restic/download?${query}`;
+}
+
+function resticSelectionBody(relativePath) {
+  return { taskId: resticBrowser.taskId, snapshot: resticBrowser.snapshot, path: relativePath || '' };
+}
+
+async function runResticAction(endpoint, message) {
+  if (!resticBrowser.taskId) return show('请先创建 Restic 任务');
+  await post(endpoint, { taskId: resticBrowser.taskId });
+  await refreshStatus();
+  show(message);
+}
+
+function renderResticJob() {
+  const job = currentStatus?.restic || { active: false };
+  const taskIndex = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId)?.index;
+  resticControls.indexStatus.textContent = `目录索引：${resticIndexStatusText(taskIndex)}`;
+  resticControls.stop.disabled = !job.active;
+  if (!job.taskId) {
+    resticControls.job.textContent = '未运行';
+    return;
+  }
+  if (job.active) {
+    const progress = job.action === 'backup'
+      ? ` · ${job.percent || 0}% · ${formatNumber(job.filesDone || 0)}/${formatNumber(job.totalFiles || 0)} 文件 · ${formatBytes(job.bytesDone || 0)}/${formatBytes(job.totalBytes || 0)}`
+      : '';
+    resticControls.job.textContent = `${job.taskName}：${resticActionText(job.action)}${progress}`;
+  } else if (job.error) {
+    resticControls.job.textContent = `${job.taskName}：失败 — ${job.error}`;
+  } else {
+    resticControls.job.textContent = `${job.taskName}：${job.result?.message || '操作完成'}`;
   }
 }
 
-function renderDecryptBrowser() {
-  decryptControls.path.textContent = decryptBrowser.path || '/';
-  decryptControls.up.disabled = !decryptBrowser.parent || decryptBrowser.path === '/';
-  decryptControls.rows.innerHTML = decryptBrowser.entries.map((entry) => {
-    if (entry.type === 'folder') {
-      return `
-        <tr>
-          <td>${escapeHtml(entry.name)}</td>
-          <td>文件夹</td>
-          <td>--</td>
-          <td><button type="button" data-decrypt-folder="${escapeHtml(entry.path)}">打开</button></td>
-        </tr>
-      `;
-    }
-    const decryptedName = entry.decryptedName || stripEncryptedSuffix(entry.name);
-    const downloadUrl = `/api/encryption/download?path=${encodeURIComponent(entry.path)}`;
-    return `
-      <tr>
-        <td>${escapeHtml(decryptedName)}</td>
-        <td>加密文件</td>
-        <td>${escapeHtml(formatBytes(entry.size || 0))}</td>
-        <td><a class="button-link" href="${downloadUrl}" download="${escapeHtml(decryptedName)}">下载</a></td>
-      </tr>
-    `;
-  }).join('') || '<tr><td colspan="4" class="empty">暂无加密文件</td></tr>';
+function resticActionText(action) {
+  return { backup: '备份中', check: '检查中', prune: '清理中', index: '建立并上传索引中' }[action] || action || '处理中';
 }
 
-function stripEncryptedSuffix(name) {
-  const text = String(name || '');
-  return text.endsWith('.pcenc') ? text.slice(0, -'.pcenc'.length) : text;
+function resticIndexStatusText(index = {}) {
+  const labels = {
+    empty: '尚未建立', checking: '后台核对 pCloud', downloading: '正在下载云端加密索引',
+    ready: `已就绪${index.activeSnapshotId ? ` · ${String(index.activeSnapshotId).slice(0, 8)}` : ''}`,
+    'missing-cloud-index': '云端索引尚未建立', error: `异常：${index.error || '未知错误'}`
+  };
+  return labels[index?.status] || index?.status || '尚未建立';
 }
 
 function updateTaskOptions(rows) {

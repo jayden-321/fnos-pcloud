@@ -355,6 +355,7 @@ export class PCloudClient {
       }
 
       request.on('error', fail);
+      request.setTimeout(this.requestTimeoutMs, () => fail(new Error(`pCloud upload timed out after ${Math.round(this.requestTimeoutMs / 1000)}s`)));
       for (const part of fieldParts) {
         request.write(part);
       }

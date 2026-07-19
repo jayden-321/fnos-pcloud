@@ -51,6 +51,35 @@ export class SqliteStore {
         last_scan_at TEXT NOT NULL DEFAULT '',
         data TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS restic_index_snapshots (
+        task_id TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL,
+        ready INTEGER NOT NULL DEFAULT 0,
+        snapshot_time TEXT NOT NULL DEFAULT '',
+        entry_count INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL,
+        PRIMARY KEY (task_id, snapshot_id)
+      );
+      CREATE TABLE IF NOT EXISTS restic_index_entries (
+        task_id TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        parent_path TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL DEFAULT '',
+        type TEXT NOT NULL DEFAULT 'file',
+        size INTEGER NOT NULL DEFAULT 0,
+        mtime TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (task_id, snapshot_id, path)
+      );
+      CREATE INDEX IF NOT EXISTS idx_restic_entries_parent
+        ON restic_index_entries(task_id, snapshot_id, parent_path, type, name);
+      CREATE TABLE IF NOT EXISTS restic_index_state (
+        task_id TEXT PRIMARY KEY,
+        active_snapshot_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'idle',
+        checked_at TEXT NOT NULL DEFAULT '',
+        data TEXT NOT NULL
+      );
     `);
   }
 
@@ -160,6 +189,144 @@ export class SqliteStore {
       stringify(record)
     );
     return structuredClone(record);
+  }
+
+  async beginResticIndexBuild(taskId, snapshot = {}) {
+    const id = requiredText(taskId, 'Restic index task id is required');
+    const snapshotId = requiredText(snapshot.id, 'Restic snapshot id is required');
+    this.#transaction(() => {
+      this.db.prepare('DELETE FROM restic_index_entries WHERE task_id = ? AND snapshot_id = ?').run(id, snapshotId);
+      this.db.prepare(`
+        INSERT INTO restic_index_snapshots (task_id, snapshot_id, ready, snapshot_time, entry_count, data)
+        VALUES (?, ?, 0, ?, 0, ?)
+        ON CONFLICT(task_id, snapshot_id) DO UPDATE SET
+          ready = 0,
+          snapshot_time = excluded.snapshot_time,
+          entry_count = 0,
+          data = excluded.data
+      `).run(id, snapshotId, String(snapshot.time || ''), stringify({ ...snapshot, id: snapshotId }));
+    });
+  }
+
+  async appendResticIndexEntries(taskId, snapshotId, entries) {
+    const id = requiredText(taskId, 'Restic index task id is required');
+    const sid = requiredText(snapshotId, 'Restic snapshot id is required');
+    const insert = this.db.prepare(`
+      INSERT OR REPLACE INTO restic_index_entries
+        (task_id, snapshot_id, path, parent_path, name, type, size, mtime)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.#transaction(() => {
+      for (const entry of entries) {
+        insert.run(id, sid, String(entry.path || ''), String(entry.parent || ''), String(entry.name || ''),
+          String(entry.type || 'file'), Number(entry.size || 0), String(entry.mtime || ''));
+      }
+    });
+    return entries.length;
+  }
+
+  async finishResticIndexBuild(taskId, snapshotId, patch = {}) {
+    const id = requiredText(taskId, 'Restic index task id is required');
+    const sid = requiredText(snapshotId, 'Restic snapshot id is required');
+    const count = Number(this.db.prepare(`
+      SELECT COUNT(*) AS count FROM restic_index_entries WHERE task_id = ? AND snapshot_id = ?
+    `).get(id, sid).count || 0);
+    const row = this.db.prepare('SELECT data FROM restic_index_snapshots WHERE task_id = ? AND snapshot_id = ?').get(id, sid);
+    if (!row) throw new Error('Restic index build was not started');
+    const snapshot = { ...cloneJson(row.data), ...structuredClone(patch), id: sid, entryCount: count, ready: true };
+    this.#transaction(() => {
+      this.db.prepare(`
+        UPDATE restic_index_snapshots SET ready = 1, entry_count = ?, data = ?
+        WHERE task_id = ? AND snapshot_id = ?
+      `).run(count, stringify(snapshot), id, sid);
+      this.#writeResticIndexState(id, {
+        ...(this.#readResticIndexState(id) ?? {}), taskId: id, activeSnapshotId: sid,
+        status: 'ready', error: '', updatedAt: new Date().toISOString()
+      });
+    });
+    return structuredClone(snapshot);
+  }
+
+  async abortResticIndexBuild(taskId, snapshotId, error = '') {
+    const id = String(taskId || '');
+    const sid = String(snapshotId || '');
+    this.#transaction(() => {
+      this.db.prepare('DELETE FROM restic_index_entries WHERE task_id = ? AND snapshot_id = ?').run(id, sid);
+      this.db.prepare('DELETE FROM restic_index_snapshots WHERE task_id = ? AND snapshot_id = ? AND ready = 0').run(id, sid);
+      this.#writeResticIndexState(id, {
+        ...(this.#readResticIndexState(id) ?? {}), taskId: id, status: 'error', error: String(error || ''),
+        updatedAt: new Date().toISOString()
+      });
+    });
+  }
+
+  async listResticSnapshotIndexes(taskId) {
+    return this.db.prepare(`
+      SELECT data FROM restic_index_snapshots WHERE task_id = ? AND ready = 1
+      ORDER BY snapshot_time DESC, snapshot_id DESC
+    `).all(String(taskId || '')).map((row) => cloneJson(row.data));
+  }
+
+  async getResticSnapshotIndex(taskId, snapshotId) {
+    const row = this.db.prepare(`
+      SELECT data FROM restic_index_snapshots WHERE task_id = ? AND snapshot_id = ? AND ready = 1
+    `).get(String(taskId || ''), String(snapshotId || ''));
+    return row ? cloneJson(row.data) : null;
+  }
+
+  async updateResticSnapshotIndex(taskId, snapshotId, patch = {}) {
+    const id = String(taskId || '');
+    const sid = String(snapshotId || '');
+    const row = this.db.prepare('SELECT data FROM restic_index_snapshots WHERE task_id = ? AND snapshot_id = ? AND ready = 1').get(id, sid);
+    if (!row) throw new Error('Restic snapshot index not found');
+    const snapshot = { ...cloneJson(row.data), ...structuredClone(patch), id: sid };
+    this.db.prepare('UPDATE restic_index_snapshots SET data = ? WHERE task_id = ? AND snapshot_id = ?').run(stringify(snapshot), id, sid);
+    return structuredClone(snapshot);
+  }
+
+  async pruneResticSnapshotIndexes(taskId, keepSnapshotIds) {
+    const id = String(taskId || '');
+    const keep = new Set([...keepSnapshotIds].map(String));
+    const rows = this.db.prepare('SELECT snapshot_id FROM restic_index_snapshots WHERE task_id = ?').all(id);
+    let removed = 0;
+    this.#transaction(() => {
+      for (const row of rows) {
+        if (keep.has(row.snapshot_id)) continue;
+        this.db.prepare('DELETE FROM restic_index_entries WHERE task_id = ? AND snapshot_id = ?').run(id, row.snapshot_id);
+        removed += Number(this.db.prepare('DELETE FROM restic_index_snapshots WHERE task_id = ? AND snapshot_id = ?').run(id, row.snapshot_id).changes || 0);
+      }
+    });
+    return removed;
+  }
+
+  async browseResticSnapshotIndex(taskId, snapshotId, parentPath = '') {
+    return this.db.prepare(`
+      SELECT path, parent_path, name, type, size, mtime
+      FROM restic_index_entries
+      WHERE task_id = ? AND snapshot_id = ? AND parent_path = ?
+      ORDER BY CASE type WHEN 'folder' THEN 0 ELSE 1 END, name
+    `).all(String(taskId || ''), String(snapshotId || ''), String(parentPath || '')).map((row) => ({
+      path: row.path, parent: row.parent_path, name: row.name, type: row.type,
+      size: Number(row.size || 0), mtime: row.mtime
+    }));
+  }
+
+  resticIndexEntries(taskId, snapshotId) {
+    return this.db.prepare(`
+      SELECT path, parent_path, name, type, size, mtime
+      FROM restic_index_entries WHERE task_id = ? AND snapshot_id = ? ORDER BY path
+    `).iterate(String(taskId || ''), String(snapshotId || ''));
+  }
+
+  async getResticIndexState(taskId) {
+    return structuredClone(this.#readResticIndexState(String(taskId || '')) ?? { taskId: String(taskId || ''), status: 'empty' });
+  }
+
+  async setResticIndexState(taskId, patch = {}) {
+    const id = requiredText(taskId, 'Restic index task id is required');
+    const state = { ...(this.#readResticIndexState(id) ?? {}), ...structuredClone(patch), taskId: id, updatedAt: new Date().toISOString() };
+    this.#writeResticIndexState(id, state);
+    return structuredClone(state);
   }
 
   async setStatus(key, status, patch = {}) {
@@ -361,6 +528,23 @@ export class SqliteStore {
     return files.length;
   }
 
+  #readResticIndexState(taskId) {
+    const row = this.db.prepare('SELECT data FROM restic_index_state WHERE task_id = ?').get(taskId);
+    return row ? cloneJson(row.data) : null;
+  }
+
+  #writeResticIndexState(taskId, state) {
+    this.db.prepare(`
+      INSERT INTO restic_index_state (task_id, active_snapshot_id, status, checked_at, data)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(task_id) DO UPDATE SET
+        active_snapshot_id = excluded.active_snapshot_id,
+        status = excluded.status,
+        checked_at = excluded.checked_at,
+        data = excluded.data
+    `).run(taskId, String(state.activeSnapshotId || ''), String(state.status || 'idle'), String(state.checkedAt || ''), stringify(state));
+  }
+
   #transaction(action) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -423,4 +607,10 @@ function nullableInteger(value) {
   }
   const number = Number(value);
   return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+function requiredText(value, message) {
+  const text = String(value || '').trim();
+  if (!text) throw new Error(message);
+  return text;
 }

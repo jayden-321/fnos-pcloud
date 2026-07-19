@@ -45,37 +45,40 @@ test('settings exposes official pCloud upload and checksum options', async () =>
   assert.match(html, /name="checksumSamplePercent"/);
   assert.match(html, /name="mtimeVerifyConcurrency"/);
   assert.match(html, /name="timezone"/);
-  assert.match(html, /name="encryptionEnabled"/);
-  assert.match(html, /id="exportEncryptionKey"/);
   assert.match(html, /失败后校验/);
   assert.match(html, /抽样校验/);
   assert.match(html, /全部校验/);
   assert.match(html, /时间不同校验并发数/);
   assert.match(html, /定时任务时区/);
-  assert.match(html, /上传前加密文件内容/);
   assert.match(script, /renameIfExists/);
   assert.match(script, /checksumMode/);
   assert.match(script, /checksumSamplePercent/);
   assert.match(script, /mtimeVerifyConcurrency/);
-  assert.match(script, /encryptionEnabled/);
-  assert.match(script, /exportEncryptionKey/);
-  assert.match(script, /\/api\/encryption\/key/);
+  assert.doesNotMatch(html, /name="encryptionEnabled"|id="exportEncryptionKey"/);
+  assert.doesNotMatch(script, /\/api\/encryption\//);
   assert.match(script, /scheduleTimezoneValue/);
 });
 
-test('web UI exposes decrypt browse tab and encrypted download actions', async () => {
+test('web UI exposes Restic snapshot browse, download, zip, and restore actions', async () => {
   const [html, script] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/app.js', import.meta.url), 'utf8')
   ]);
 
-  assert.match(html, /data-tab="decrypt"/);
-  assert.match(html, /id="decryptRows"/);
-  assert.match(html, /id="decryptPath"/);
-  assert.match(script, /loadDecryptFolder/);
-  assert.match(script, /\/api\/encryption\/browse/);
-  assert.match(script, /\/api\/encryption\/download/);
-  assert.match(script, /decryptedName/);
+  assert.doesNotMatch(html, /data-tab="decrypt"|id="decryptRows"/);
+  assert.match(html, /data-tab="restic"/);
+  assert.match(html, /id="resticRows"/);
+  assert.match(html, /id="resticDownloadFolder"/);
+  assert.match(html, /id="resticRestore"/);
+  assert.match(html, /id="resticRebuildIndex"/);
+  assert.match(html, /id="resticIndexStatus"/);
+  assert.match(script, /loadResticSnapshots/);
+  assert.match(script, /\/api\/restic\/browse/);
+  assert.match(script, /\/api\/restic\/download/);
+  assert.match(script, /\/api\/restic\/restore/);
+  assert.match(script, /\/api\/restic\/index\/rebuild/);
+  assert.match(script, /window\.open\(url, '_blank', 'noopener'\)/);
+  assert.match(script, /恢复信息已生成，请查看浏览器下载记录或新窗口/);
 });
 
 test('settings exposes pCloud upload and download speed test controls', async () => {
@@ -120,6 +123,18 @@ test('task metrics include a separate existing-file count', async () => {
   assert.match(script, /stats\.existing/);
 });
 
+test('task dashboard omits the live upload speed metric', async () => {
+  const [html, script, styles] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
+  ]);
+
+  assert.doesNotMatch(html, /id="statSpeed"/);
+  assert.doesNotMatch(script, /statSpeed|uploadSpeedBytesPerSecond/);
+  assert.match(styles, /grid-template-columns: repeat\(6, minmax\(108px, 1fr\)\)/);
+});
+
 test('web UI exposes current-task metrics and task schedule controls', async () => {
   const [html, script] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
@@ -135,6 +150,17 @@ test('web UI exposes current-task metrics and task schedule controls', async () 
   assert.match(script, /scheduleWeekdays/);
   assert.match(script, /每天/);
   assert.match(script, /每周/);
+});
+
+test('queue panel exposes a safe clear action', async () => {
+  const [html, script] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(html, /id="clearQueue"/);
+  assert.match(script, /del\('\/api\/queue'\)/);
+  assert.match(script, /不会删除 NAS 或 pCloud 文件/);
 });
 
 test('manual scan button reports when there are no enabled sync tasks', async () => {

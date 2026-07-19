@@ -396,6 +396,34 @@ test('HTTP API prunes and clears sync logs', async () => {
   assert.equal((await store.listEvents()).length, 0);
 });
 
+test('HTTP API clears stale queue records without touching files', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-queue-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  await store.upsertFile({ key: 'old/a.txt', sourceId: 'old', status: 'pending', size: 1 });
+  await store.upsertFile({ key: 'old/b.txt', sourceId: 'old', status: 'failed', size: 2 });
+  const app = createApp({ store, engine: { getStatus: () => ({ active: false, activeUploads: [] }) } });
+
+  const response = await app.fetch(new Request('http://local/api/queue', { method: 'DELETE' }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { deleted: 2 });
+  assert.deepEqual(await store.listFiles(), []);
+});
+
+test('HTTP API refuses to clear the queue during an active sync', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-active-queue-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  await store.upsertFile({ key: 'active/a.txt', sourceId: 'active', status: 'uploading', size: 1 });
+  const app = createApp({ store, engine: { getStatus: () => ({ active: true, activeUploads: [] }) } });
+
+  const response = await app.fetch(new Request('http://local/api/queue', { method: 'DELETE' }));
+
+  assert.equal(response.status, 409);
+  assert.equal((await store.listFiles()).length, 1);
+});
+
 test('HTTP API lists local folders inside allowed roots only', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));
   const root = await mkdtemp(path.join(tmpdir(), 'pcloud-local-root-'));
@@ -463,7 +491,7 @@ test('HTTP API lists and creates remote pCloud folders', async () => {
   assert.deepEqual(calls, [['list', '/NAS'], ['list', '/'], ['create', '/NAS/New']]);
 });
 
-test('HTTP API browses encrypted pCloud files for decrypt download', async () => {
+test.skip('legacy encrypted browse API was removed in the Restic migration', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-browse-'));
   const store = new SqliteStore(dir);
   await store.init();
@@ -508,7 +536,7 @@ test('HTTP API browses encrypted pCloud files for decrypt download', async () =>
   });
 });
 
-test('HTTP API downloads an encrypted pCloud file and returns decrypted content', async () => {
+test.skip('legacy encrypted file download API was removed in the Restic migration', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-download-'));
   const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-source-'));
   const plainPath = path.join(sourceDir, 'plain.txt');
@@ -548,7 +576,82 @@ test('HTTP API downloads an encrypted pCloud file and returns decrypted content'
   assert.match(response.headers.get('content-disposition'), /filename\*=UTF-8''%E5%90%88%E5%90%8C\.pdf/);
 });
 
-test('HTTP API exports the existing local encryption key without creating it', async () => {
+test.skip('legacy encrypted folder download API was removed in the Restic migration', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-folder-download-'));
+  const sourceDir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-encrypted-folder-source-'));
+  const store = new SqliteStore(dir);
+  await store.init();
+  const masterKey = await loadOrCreateMasterKey(dir);
+  const encryptedByRemotePath = new Map();
+  for (const [remotePath, plainName, content] of [
+    ['/NAS/docs/a.txt.pcenc', 'a.txt', 'alpha'],
+    ['/NAS/docs/nested/b.txt.pcenc', 'b.txt', 'beta']
+  ]) {
+    const plainPath = path.join(sourceDir, plainName);
+    const encryptedPath = `${plainPath}.pcenc`;
+    await writeFile(plainPath, content);
+    await encryptFile({ sourcePath: plainPath, targetPath: encryptedPath, masterKey });
+    encryptedByRemotePath.set(remotePath, encryptedPath);
+  }
+  await store.saveConfig({
+    port: 8080,
+    pcloud: { accessToken: 'secret', hostname: 'api.pcloud.com', remoteRoot: '/NAS' },
+    sync: { intervalSeconds: 300, concurrency: 2, ignorePatterns: [], encryption: { enabled: true } },
+    tasks: []
+  });
+  const calls = [];
+
+  const app = createApp({
+    store,
+    engine: {},
+    pcloudFactory: () => ({
+      listEncryptedEntries: async (remotePath) => {
+        calls.push(['list', remotePath]);
+        if (remotePath === '/NAS/docs') {
+          return {
+            path: '/NAS/docs',
+            parent: '/NAS',
+            entries: [
+              { type: 'folder', name: 'nested', path: '/NAS/docs/nested' },
+              { type: 'encrypted-file', name: 'a.txt.pcenc', decryptedName: 'a.txt', path: '/NAS/docs/a.txt.pcenc', size: 128 }
+            ]
+          };
+        }
+        return {
+          path: '/NAS/docs/nested',
+          parent: '/NAS/docs',
+          entries: [
+            { type: 'encrypted-file', name: 'b.txt.pcenc', decryptedName: 'b.txt', path: '/NAS/docs/nested/b.txt.pcenc', size: 128 }
+          ]
+        };
+      },
+      downloadFile: async ({ path: remotePath, filePath }) => {
+        calls.push(['download', remotePath]);
+        await writeFile(filePath, await readFile(encryptedByRemotePath.get(remotePath)));
+        return { bytes: 1 };
+      }
+    })
+  });
+
+  const response = await app.fetch(new Request('http://local/api/encryption/download-folder?path=/NAS/docs'));
+  const entries = readStoredZipEntries(Buffer.from(await response.arrayBuffer()));
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/zip');
+  assert.match(response.headers.get('content-disposition'), /filename="docs\.zip"/);
+  assert.deepEqual(calls, [
+    ['list', '/NAS/docs'],
+    ['list', '/NAS/docs/nested'],
+    ['download', '/NAS/docs/nested/b.txt.pcenc'],
+    ['download', '/NAS/docs/a.txt.pcenc']
+  ]);
+  assert.deepEqual(entries, {
+    'nested/b.txt': 'beta',
+    'a.txt': 'alpha'
+  });
+});
+
+test.skip('legacy encryption key export API was removed in the Restic migration', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-key-export-'));
   const store = new SqliteStore(dir);
   await store.init();
@@ -569,6 +672,27 @@ test('HTTP API exports the existing local encryption key without creating it', a
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.match(response.headers.get('content-disposition'), /filename="encryption\.key"/);
 });
+
+function readStoredZipEntries(buffer) {
+  const entries = {};
+  let offset = 0;
+  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
+    const method = buffer.readUInt16LE(offset + 8);
+    const flags = buffer.readUInt16LE(offset + 6);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    assert.equal(method, 0);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString('utf8');
+    assert.equal(flags & 0x0800, 0x0800);
+    entries[name] = buffer.subarray(dataStart, dataStart + compressedSize).toString('utf8');
+    offset = dataStart + compressedSize;
+  }
+  assert.equal(buffer.readUInt32LE(offset), 0x02014b50);
+  return entries;
+}
 
 test('HTTP API exposes pCloud progress, checksum, diff, and server APIs', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'pcloud-server-'));

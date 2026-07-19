@@ -1,26 +1,23 @@
-import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { normalizeConfig, redactConfig } from '../config/config.js';
-import { decryptFile, loadMasterKey } from '../crypto/encryption.js';
 import { defaultLocalRoots, listLocalFolders } from '../folders/localFolders.js';
 import { PCloudClient } from '../pcloud/client.js';
+import { fileStreamWithCleanup as resticFileStreamWithCleanup } from '../restic/service.js';
 import { APP_VERSION } from '../version.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../../public');
 
-export function createApp({ store, engine, pcloudFactory = null, localRoots = null }) {
+export function createApp({ store, engine, restic = null, pcloudFactory = null, localRoots = null }) {
   return {
     async fetch(request) {
       try {
         const url = new URL(request.url);
         if (url.pathname.startsWith('/api/')) {
-          return await handleApi({ request, url, store, engine, pcloudFactory, localRoots });
+          return await handleApi({ request, url, store, engine, restic, pcloudFactory, localRoots });
         }
         return await serveStatic(url.pathname);
       } catch (error) {
@@ -51,7 +48,7 @@ export function listen(app, port, host = '0.0.0.0') {
   return server;
 }
 
-async function handleApi({ request, url, store, engine, pcloudFactory, localRoots }) {
+async function handleApi({ request, url, store, engine, restic, pcloudFactory, localRoots }) {
   if (request.method === 'GET' && url.pathname === '/api/config') {
     const config = normalizeConfig(await store.loadConfig() ?? {});
     return json(redactConfig(config));
@@ -86,8 +83,103 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
       pending: await store.listFiles({ status: 'pending' }),
       uploading: await store.listFiles({ status: 'uploading' }),
       events: await store.listEvents(200),
-      engine: engineStatus
+      engine: engineStatus,
+      restic: restic?.getStatus?.() ?? { active: false },
+      resticTasks: restic?.taskStatuses ? await restic.taskStatuses() : []
     });
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/restic/status') {
+    return json({
+      job: restic?.getStatus?.() ?? { active: false },
+      tasks: restic?.taskStatuses ? await restic.taskStatuses() : []
+    });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/password') {
+    requireRestic(restic);
+    const body = await readJsonBody(request);
+    return json(await restic.setPassword(body.taskId, body.password));
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/restic/recovery') {
+    requireRestic(restic);
+    const recovery = await restic.exportRecovery(url.searchParams.get('taskId') || '');
+    return new Response(recovery.content, {
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'content-disposition': contentDisposition(recovery.filename),
+        'cache-control': 'no-store'
+      }
+    });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/backup') {
+    requireRestic(restic);
+    const body = await readJsonBody(request);
+    return json(await restic.startBackup(body.taskId), 202);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/check') {
+    requireRestic(restic);
+    const body = await readJsonBody(request);
+    return json(await restic.startCheck(body.taskId), 202);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/prune') {
+    requireRestic(restic);
+    const body = await readJsonBody(request);
+    return json(await restic.startPrune(body.taskId), 202);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/index/rebuild') {
+    requireRestic(restic);
+    const body = await readJsonBody(request);
+    return json(await restic.startIndexRebuild(body.taskId, body.snapshot || ''), 202);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/stop') {
+    requireRestic(restic);
+    return json(restic.stopJob());
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/restic/snapshots') {
+    requireRestic(restic);
+    return json({ snapshots: await restic.snapshots(url.searchParams.get('taskId') || '') });
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/restic/browse') {
+    requireRestic(restic);
+    return json(await restic.browse(
+      url.searchParams.get('taskId') || '',
+      url.searchParams.get('snapshot') || '',
+      url.searchParams.get('path') || ''
+    ));
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/restic/download') {
+    requireRestic(restic);
+    const download = await restic.prepareDownload(
+      url.searchParams.get('taskId') || '',
+      url.searchParams.get('snapshot') || '',
+      url.searchParams.get('path') || '',
+      { zip: url.searchParams.get('zip') === '1' }
+    );
+    const info = await stat(download.filePath);
+    return new Response(resticFileStreamWithCleanup(download.filePath, download.tempDir), {
+      headers: {
+        'content-type': download.contentType,
+        'content-length': String(info.size),
+        'content-disposition': contentDisposition(download.filename),
+        'cache-control': 'no-store'
+      }
+    });
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/restic/restore') {
+    requireRestic(restic);
+    const body = await readJsonBody(request);
+    return json(await restic.restoreToNas(body.taskId, body.snapshot, body.path || ''));
   }
 
   if (request.method === 'GET' && url.pathname === '/api/local-folders') {
@@ -118,26 +210,6 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     const config = normalizeConfig(await store.loadConfig() ?? {});
     const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
     return json(await client.listRemoteFolders(url.searchParams.get('path') || '/'));
-  }
-
-  if (request.method === 'GET' && url.pathname === '/api/encryption/browse') {
-    const config = normalizeConfig(await store.loadConfig() ?? {});
-    const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
-    return json(await client.listEncryptedEntries(url.searchParams.get('path') || '/'));
-  }
-
-  if (request.method === 'GET' && url.pathname === '/api/encryption/key') {
-    return exportEncryptionKey(store);
-  }
-
-  if (request.method === 'GET' && url.pathname === '/api/encryption/download') {
-    const config = normalizeConfig(await store.loadConfig() ?? {});
-    const client = pcloudFactory ? pcloudFactory(config) : new PCloudClient(config.pcloud);
-    return downloadDecryptedFile({
-      store,
-      client,
-      remotePath: url.searchParams.get('path') || ''
-    });
   }
 
   if (request.method === 'GET' && url.pathname === '/api/pcloud/current-server') {
@@ -264,6 +336,14 @@ async function handleApi({ request, url, store, engine, pcloudFactory, localRoot
     return json({ deleted: await store.clearEvents() });
   }
 
+  if (request.method === 'DELETE' && url.pathname === '/api/queue') {
+    const status = engine.getStatus?.() ?? {};
+    if (status.active || status.activeUploads?.length) {
+      return json({ error: '同步正在运行，请先停止同步再清理队列' }, 409);
+    }
+    return json({ deleted: await store.clearFiles() });
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/oauth/exchange') {
     const body = await request.json();
     const config = normalizeConfig(mergeConfig(await store.loadConfig() ?? {}, body));
@@ -343,6 +423,14 @@ async function readJsonBody(request) {
 
 function json(body, status = 200) {
   return Response.json(body, { status });
+}
+
+function requireRestic(restic) {
+  if (!restic) {
+    const error = new Error('Restic service is unavailable');
+    error.statusCode = 501;
+    throw error;
+  }
 }
 
 async function mtimeVerificationStats(store, taskId) {
@@ -443,6 +531,86 @@ async function downloadDecryptedFile({ store, client, remotePath }) {
   }
 }
 
+async function downloadDecryptedFolder({ store, client, remotePath }) {
+  const normalizedRemotePath = normalizeRemoteFolderPath(remotePath);
+  if (!client?.listEncryptedEntries || !client?.downloadFile) {
+    return json({ error: 'pCloud encrypted folder download is unavailable' }, 501);
+  }
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'pcloud-decrypt-folder-'));
+  const encryptedDir = path.join(tempDir, 'encrypted');
+  const decryptedDir = path.join(tempDir, 'decrypted');
+  const zipPath = path.join(tempDir, 'decrypted-folder.zip');
+  try {
+    await mkdir(encryptedDir, { recursive: true });
+    await mkdir(decryptedDir, { recursive: true });
+    const masterKey = await loadMasterKey(store.dataDir);
+    const files = await collectEncryptedFolderFiles(client, normalizedRemotePath);
+    const zipEntries = [];
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const encryptedPath = path.join(encryptedDir, `${index}.pcenc`);
+      const decryptedPath = path.join(decryptedDir, String(index));
+      await client.downloadFile({
+        path: file.remotePath,
+        filePath: encryptedPath
+      });
+      await decryptFile({
+        sourcePath: encryptedPath,
+        targetPath: decryptedPath,
+        masterKey
+      });
+      zipEntries.push({
+        sourcePath: decryptedPath,
+        archivePath: file.archivePath
+      });
+    }
+
+    await writeStoredZip({ entries: zipEntries, targetPath: zipPath });
+    const info = await stat(zipPath);
+    const filename = decryptedFolderZipFilename(normalizedRemotePath);
+    return new Response(fileStreamWithCleanup(zipPath, tempDir), {
+      headers: {
+        'content-type': 'application/zip',
+        'content-length': String(info.size),
+        'content-disposition': contentDisposition(filename)
+      }
+    });
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function collectEncryptedFolderFiles(client, rootPath) {
+  const files = [];
+  const visited = new Set();
+
+  async function visit(remotePath, archivePrefix = '') {
+    const normalized = normalizeRemoteFolderPath(remotePath);
+    if (visited.has(normalized)) {
+      return;
+    }
+    visited.add(normalized);
+    const listing = await client.listEncryptedEntries(normalized);
+    for (const entry of listing.entries || []) {
+      if (entry.type === 'folder') {
+        await visit(entry.path, joinArchivePath(archivePrefix, entry.name));
+      } else if (entry.type === 'encrypted-file') {
+        const name = entry.decryptedName || decryptedFilename(entry.name);
+        files.push({
+          remotePath: entry.path,
+          archivePath: joinArchivePath(archivePrefix, name)
+        });
+      }
+    }
+  }
+
+  await visit(rootPath);
+  return files;
+}
+
 async function exportEncryptionKey(store) {
   const keyPath = path.join(store.dataDir, 'encryption.key');
   let body;
@@ -481,6 +649,29 @@ function fileStreamWithCleanup(filePath, tempDir) {
 function decryptedFilename(remotePath) {
   const name = path.posix.basename(String(remotePath || 'download.pcenc'));
   return name.endsWith('.pcenc') ? name.slice(0, -'.pcenc'.length) || 'download' : name;
+}
+
+function decryptedFolderZipFilename(remotePath) {
+  const name = path.posix.basename(normalizeRemoteFolderPath(remotePath));
+  return `${name && name !== '/' ? name : 'pcloud-encrypted-files'}.zip`;
+}
+
+function normalizeRemoteFolderPath(remotePath) {
+  const value = String(remotePath || '/').trim().replaceAll('\\', '/');
+  if (!value || value === '/') {
+    return '/';
+  }
+  const parts = value.split('/').filter(Boolean);
+  return `/${parts.join('/')}`;
+}
+
+function joinArchivePath(...parts) {
+  return parts
+    .join('/')
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((part) => part && part !== '.' && part !== '..')
+    .join('/');
 }
 
 function contentDisposition(filename) {

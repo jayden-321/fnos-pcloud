@@ -12,6 +12,7 @@ test('normalizeConfig supplies safe defaults for first run', () => {
   assert.equal(config.sync.logRetentionDays, 30);
   assert.equal(config.sync.logRetentionCount, 300);
   assert.equal(config.sync.encryption.enabled, false);
+  assert.deepEqual(config.sync.ignorePatterns, []);
   assert.equal(config.pcloud.hostname, 'api.pcloud.com');
   assert.equal(config.pcloud.remoteRoot, '/');
   assert.deepEqual(config.tasks, []);
@@ -182,6 +183,20 @@ test('normalizeConfig accepts explicit multi-task definitions', () => {
       mode: 'upload'
     }
   ]);
+});
+
+test('normalizeConfig preserves Restic task mode and retention policy', () => {
+  const config = normalizeConfig({
+    tasks: [{
+      id: 'honvin', name: 'honvin', localPath: '/vol2/1000/honvin',
+      remotePath: '/restic-backups/honvin', mode: 'restic',
+      restic: { keepDaily: 14, keepWeekly: 8, keepMonthly: 24, compression: 'max' }
+    }]
+  });
+
+  assert.equal(config.tasks[0].mode, 'restic');
+  assert.deepEqual(config.tasks[0].restic, { keepDaily: 14, keepWeekly: 8, keepMonthly: 24, compression: 'max' });
+  assert.deepEqual(config.sources, []);
 });
 
 test('normalizeConfig accepts task-level schedules', () => {

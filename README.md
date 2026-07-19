@@ -1,15 +1,19 @@
 # pCloud NAS Sync
 
-fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. It supports multiple one-way upload tasks, local and remote folder pickers, pCloud API based remote scanning, pCloud diff cursors, retry handling, detailed sync logs, and upload progress. The project is designed for personal self-hosted NAS backup and does not include any bundled pCloud credentials, user IDs, secrets, or tokens.
+fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. Its recommended mode uses Restic repositories for encrypted, deduplicated snapshots, retention, integrity checks, indexed browsing, downloads, and isolated restores. The legacy one-way upload mode remains available for existing tasks. The project is designed for personal self-hosted NAS backup and does not include bundled pCloud credentials, user IDs, secrets, or tokens.
 
 ## Features
 
 - One-way uploads from multiple NAS folders to pCloud.
 - Local deletions are not propagated to pCloud.
-- Web UI with Sync Tasks, Sync Logs, Decrypt Browse, and Settings pages.
+- Web UI with Sync Tasks, Sync Logs, Restic Repository, and Settings pages.
+- Restic repository backups stored through a local REST backend that writes to pCloud.
+- Encrypted snapshot browsing backed by a locally cached, encrypted cloud index.
+- File downloads, folder ZIP downloads, repository checks, retention policies, prune, and isolated restores to a dedicated NAS directory.
+- Full-fidelity Restic backups by default: no filename or file-type exclusion is added unless the user explicitly configures an ignore pattern.
 - Local folder picker for NAS paths that are visible inside the container.
 - pCloud remote folder picker and remote folder creation.
-- Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, active uploads, and aggregate upload speed.
+- Summary metrics for total files, uploaded files, files that already exist in pCloud, failed files, pending files, and active uploads.
 - Task queue execution: each task scans and uploads before the next task starts.
 - Per-task scheduling: manual, interval, daily, and weekly schedules are supported, with a configurable scheduler timezone for daily and weekly tasks.
 - Scheduled runs drain a local filesystem watcher queue instead of rescanning every task directory.
@@ -19,8 +23,6 @@ fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected 
 - Filterable file-level sync logs with file size, status, and active upload progress.
 - Optional pCloud upload conflict renaming through `uploadfile` `renameifexists`.
 - Optional upload verification through `checksumfile`: off, failed-upload verification, sampled verification, or all uploads.
-- Optional content encryption before upload. Encrypted tasks store a local master key on the NAS and upload `.pcenc` ciphertext files to pCloud.
-- Decrypt Browse tab for listing encrypted pCloud files, downloading locally decrypted copies, and exporting the local key for backup.
 - SQLite runtime state for config, file records, and sync logs.
 - Configurable sync log retention by age and count, plus one-click log deletion.
 - Failed or stale uploading files can be retried manually; queued files are processed immediately after retry.
@@ -62,47 +64,46 @@ The sync logic uses the official pCloud HTTP/JSON API:
 
 The local folder picker reads NAS paths that are mounted into the Docker container. pCloud does not provide an API for local NAS filesystem browsing. Remote folder browsing, remote folder creation, uploads, progress, and verification-related features are implemented through pCloud APIs.
 
-## Content Encryption
+## Restic Backups and Recovery
 
-The Settings page can enable upload-time content encryption. When enabled, the
-app creates a random 32-byte master key at `/data/encryption.key` and reuses it
-for scheduled uploads. Each file is encrypted into a temporary AES-256-GCM
-envelope with a per-file salt and nonce, then uploaded to pCloud with a `.pcenc`
-suffix. The temporary ciphertext is deleted after the upload attempt.
+Create a task in `Restic` mode, set a password of at least 12 characters, and
+run the first backup. The password is stored separately under `/data/restic`
+and is never written into the task configuration. Export the recovery
+information from the Restic Repository page and keep it offline; losing both
+the password and recovery information makes the encrypted repository
+unrecoverable.
 
-This protects file contents from being readable in pCloud, but it does not hide
-folder names or file names beyond the `.pcenc` suffix. It also does not protect
-against an attacker who can read the NAS app data directory, because the local
-key must be available for unattended scheduled uploads.
+Restic commands receive no built-in exclude list. With an empty Ignore Patterns
+field, every file under the selected source is eligible for backup, including
+archives, temporary-looking names, and application metadata. Each non-empty
+pattern entered by the user is passed explicitly to Restic as an exclusion.
 
-Back up `/data/encryption.key`. If that key is lost, previously uploaded
-encrypted files cannot be decrypted by this app.
-
-The Settings page can export the existing `/data/encryption.key` file for
-offline backup. Exporting does not create a new key.
-
-The Decrypt Browse tab reads pCloud folders, shows only folders and `.pcenc`
-encrypted files, and downloads selected files by fetching the ciphertext,
-decrypting it locally with `/data/encryption.key`, and returning the original
-filename without the `.pcenc` suffix.
+After a successful snapshot, the app builds a plaintext directory index
+locally, encrypts the index, and publishes it beside the repository in pCloud.
+The UI uses the cached index for fast snapshot and folder browsing. Selected
+files can be downloaded, folders can be returned as ZIP archives, and restores
+are written below the dedicated `/restore` mount without overwriting the source.
 
 ## NAS Folder Mounts
 
-The default Docker Compose file mounts `/vol1` read-only:
+The default Docker Compose file mounts `/vol1` and `/vol2` read-only and exposes
+a dedicated writable restore directory:
 
 ```yaml
 volumes:
   - "/vol1:/vol1:ro"
+  - "/vol2:/vol2:ro"
+  - "${RESTIC_RESTORE_DIR:-/vol1/1000/pcloudbackups/restic-restore}:/restore"
 ```
 
-If your sync folders are on `/vol2` or another volume, add the matching read-only mount in `app/docker/docker-compose.yaml`, for example:
+If your sync folders are on another volume, add the matching read-only mount in `app/docker/docker-compose.yaml`, for example:
 
 ```yaml
 volumes:
-  - "/vol2:/vol2:ro"
+  - "/vol3:/vol3:ro"
 ```
 
-The UI folder picker can browse paths that are visible inside the container, such as `/vol1/1000/photos`. By default, only `/vol1` is mounted and visible. Add more volume mounts if you need to browse other NAS volumes.
+The UI folder picker can browse paths that are visible inside the container, such as `/vol1/1000/photos` and `/vol2/1000/honvin`. Add more read-only volume mounts if you need to browse other NAS volumes. Set `RESTIC_RESTORE_DIR` to change the host directory that receives isolated restores.
 
 ## Base Image
 
@@ -152,16 +153,19 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.4.6 is one-way upload only, not two-way sync.
-- v0.4.6 does not propagate local deletions to pCloud.
-- v0.4.6 content encryption protects file contents only; folder and file names remain visible with a `.pcenc` suffix.
-- v0.4.6 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.5.8 is a backup application, not a two-way sync client.
+- Legacy upload tasks do not propagate local deletions to pCloud.
+- v0.5.8 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.5.8: Adds Restic encrypted repositories, retention and integrity operations, encrypted cloud indexes, snapshot browsing, file and folder downloads, isolated NAS restores, `/vol2` source support, and full-fidelity defaults with no implicit exclusions.
+- v0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue is still reporting the active task. Completed file stats now display `同步完成` instead of staying on `同步中`.
+- v0.4.8: Adds decrypted folder downloads in Decrypt Browse. The app recursively lists encrypted pCloud folders, downloads `.pcenc` files, decrypts them locally with `/data/encryption.key`, and returns a zip with the original folder structure.
+- v0.4.7: Removes the live upload-speed metric from the Sync Tasks dashboard so the top summary no longer shows a persistent `0 B/s` card. The separate pCloud speed test still reports upload/download throughput.
 - v0.4.6: Adds a Decrypt Browse tab and Settings key export for encrypted pCloud files. The tab lists folders and `.pcenc` files, exports the existing `/data/encryption.key` for backup, downloads ciphertext through pCloud, decrypts it locally with `/data/encryption.key`, and returns the original filename/content.
 - v0.4.5: Adds optional local-key content encryption before upload. When enabled, the app stores `/data/encryption.key` locally, uploads AES-256-GCM encrypted `.pcenc` files to pCloud, and records encrypted-file metadata for future scans.
 - v0.4.2: Restores the default Docker port bind to `0.0.0.0` so fnOS app center iframe launches can reach `NAS-IP:17880` after install. Set `TRIM_SERVICE_BIND=127.0.0.1` only when a separate host-local reverse proxy is handling access.
