@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import { createServer } from 'node:http';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,13 +11,14 @@ import { PCloudClient } from '../pcloud/client.js';
 const TYPES = new Set(['data', 'keys', 'locks', 'snapshots', 'index']);
 
 export class ResticPCloudBackend {
-  constructor({ store, dataDir = store?.dataDir || '/data', pcloudFactory = null, port = 18081 } = {}) {
+  constructor({ store, dataDir = store?.dataDir || '/data', pcloudFactory = null, port = 18081, uploadConcurrency = 3 } = {}) {
     this.store = store;
     this.dataDir = dataDir;
     this.pcloudFactory = pcloudFactory ?? ((config) => new PCloudClient(config.pcloud));
     this.port = port;
     this.server = null;
-    this.uploadChain = Promise.resolve();
+    this.uploadLimiter = new AsyncLimiter(uploadConcurrency);
+    this.folderCache = new Map();
   }
 
   async start() {
@@ -131,13 +132,26 @@ export class ResticPCloudBackend {
   }
 
   async uploadObject(request, client, remotePath) {
+    const folder = await this.ensureRemoteFolder(client, path.posix.dirname(remotePath));
+    const filename = path.posix.basename(remotePath);
+    const size = requestContentLength(request);
+    if (size !== null && typeof client.uploadStream === 'function') {
+      await this.uploadLimiter.run(() => client.uploadStream({
+        stream: request,
+        size,
+        filename,
+        folderid: folder.folderid,
+        mtime: Math.trunc(Date.now() / 1000)
+      }));
+      return;
+    }
+
     const tempPath = path.join(this.tempRoot(), randomUUID());
     try {
       await pipeline(request, createWriteStream(tempPath, { mode: 0o600 }));
-      const folder = await client.ensureFolder(path.posix.dirname(remotePath));
-      await this.serializeUpload(() => client.uploadFile({
+      await this.uploadLimiter.run(() => client.uploadFile({
           filePath: tempPath,
-          filename: path.posix.basename(remotePath),
+          filename,
           folderid: folder.folderid,
           mtime: Math.trunc(Date.now() / 1000)
         }));
@@ -166,11 +180,57 @@ export class ResticPCloudBackend {
     return path.join(this.dataDir, 'restic', 'backend-upload');
   }
 
-  serializeUpload(operation) {
-    const current = this.uploadChain.then(operation, operation);
-    this.uploadChain = current.catch(() => {});
-    return current;
+  async ensureRemoteFolder(client, remotePath) {
+    let pending = this.folderCache.get(remotePath);
+    if (!pending) {
+      pending = client.ensureFolder(remotePath);
+      this.folderCache.set(remotePath, pending);
+      pending.catch(() => {
+        if (this.folderCache.get(remotePath) === pending) this.folderCache.delete(remotePath);
+      });
+    }
+    return pending;
   }
+}
+
+class AsyncLimiter {
+  constructor(limit) {
+    const normalized = Number(limit);
+    if (!Number.isSafeInteger(normalized) || normalized < 1) throw new Error('Upload concurrency must be a positive integer');
+    this.limit = normalized;
+    this.active = 0;
+    this.waiters = [];
+  }
+
+  async run(operation) {
+    await this.acquire();
+    try {
+      return await operation();
+    } finally {
+      this.release();
+    }
+  }
+
+  async acquire() {
+    if (this.active < this.limit) {
+      this.active += 1;
+      return;
+    }
+    await new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  release() {
+    const next = this.waiters.shift();
+    if (next) next();
+    else this.active -= 1;
+  }
+}
+
+function requestContentLength(request) {
+  const raw = request.headers?.['content-length'];
+  if (Array.isArray(raw) || raw === undefined || raw === null || raw === '') return null;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size >= 0 ? size : null;
 }
 
 async function pcloudStat(client, remotePath) {

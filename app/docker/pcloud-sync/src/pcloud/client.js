@@ -222,25 +222,38 @@ export class PCloudClient {
   }
 
   async uploadFile({ filePath, filename = path.basename(filePath), folderid, remotePath, mtime, progressHash, renameIfExists = false, onProgress, signal }) {
-    const fields = {
-      access_token: this.accessToken,
-      nopartial: '1'
-    };
-    if (folderid !== undefined && folderid !== null) {
-      fields.folderid = String(folderid);
-    } else if (remotePath) {
-      fields.path = remotePath;
-    }
-    if (mtime) {
-      fields.mtime = String(mtime);
-    }
-    if (progressHash) {
-      fields.progresshash = progressHash;
-    }
-    if (renameIfExists) {
-      fields.renameifexists = '1';
-    }
+    const fields = uploadFields({
+      accessToken: this.accessToken,
+      folderid,
+      remotePath,
+      mtime,
+      progressHash,
+      renameIfExists
+    });
     return this.multipartUpload('/uploadfile', fields, filePath, filename, onProgress, signal);
+  }
+
+  async uploadStream({ stream, size, filename, folderid, remotePath, mtime, progressHash, renameIfExists = false, onProgress, signal }) {
+    if (!stream || typeof stream.pipe !== 'function') {
+      throw new Error('Upload stream is required');
+    }
+    const fileSize = normalizeUploadSize(size);
+    const fields = uploadFields({
+      accessToken: this.accessToken,
+      folderid,
+      remotePath,
+      mtime,
+      progressHash,
+      renameIfExists
+    });
+    this.#requireToken();
+    return this.#multipartUploadOnce('/uploadfile', fields, {
+      createStream: () => stream,
+      fileSize,
+      filename,
+      onProgress,
+      signal
+    });
   }
 
   async requestJson(method, params = {}, options = {}) {
@@ -277,10 +290,17 @@ export class PCloudClient {
 
   async multipartUpload(urlPath, fields, filePath, filename, onProgress = null, signal = null) {
     this.#requireToken();
-    return retryTransient(() => this.#multipartUploadOnce(urlPath, fields, filePath, filename, onProgress, signal));
+    const fileSize = (await stat(filePath)).size;
+    return retryTransient(() => this.#multipartUploadOnce(urlPath, fields, {
+      createStream: () => createReadStream(filePath),
+      fileSize,
+      filename,
+      onProgress,
+      signal
+    }));
   }
 
-  async #multipartUploadOnce(urlPath, fields, filePath, filename, onProgress, signal) {
+  async #multipartUploadOnce(urlPath, fields, { createStream, fileSize, filename, onProgress, signal }) {
     if (signal?.aborted) {
       throw uploadStoppedError();
     }
@@ -297,7 +317,6 @@ export class PCloudClient {
       + `Content-Disposition: form-data; name="file"; filename="${escapeHeader(filename)}"\r\n`
       + 'Content-Type: application/octet-stream\r\n\r\n';
     const fileFooter = `\r\n--${boundary}--\r\n`;
-    const fileSize = (await stat(filePath)).size;
     const contentLength = fieldParts.reduce((total, part) => total + Buffer.byteLength(part), 0)
       + Buffer.byteLength(fileHeader)
       + fileSize
@@ -360,7 +379,12 @@ export class PCloudClient {
         request.write(part);
       }
       request.write(fileHeader);
-      stream = createReadStream(filePath);
+      try {
+        stream = createStream();
+      } catch (error) {
+        fail(error);
+        return;
+      }
       stream.on('error', fail);
       stream.on('data', (chunk) => {
         onProgress?.(chunk.length, fileSize);
@@ -386,6 +410,36 @@ export class PCloudClient {
       throw new Error('pCloud access token is not configured');
     }
   }
+}
+
+function uploadFields({ accessToken, folderid, remotePath, mtime, progressHash, renameIfExists }) {
+  const fields = {
+    access_token: accessToken,
+    nopartial: '1'
+  };
+  if (folderid !== undefined && folderid !== null) {
+    fields.folderid = String(folderid);
+  } else if (remotePath) {
+    fields.path = remotePath;
+  }
+  if (mtime) {
+    fields.mtime = String(mtime);
+  }
+  if (progressHash) {
+    fields.progresshash = progressHash;
+  }
+  if (renameIfExists) {
+    fields.renameifexists = '1';
+  }
+  return fields;
+}
+
+function normalizeUploadSize(value) {
+  const size = Number(value);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error('Upload stream size must be a non-negative safe integer');
+  }
+  return size;
 }
 
 function isLocalHttpUrl(value) {

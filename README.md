@@ -160,15 +160,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.5.9 is a backup application, not a two-way sync client.
+- v0.5.10 is a backup application, not a two-way sync client.
 - Legacy upload tasks do not propagate local deletions to pCloud.
-- v0.5.9 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.5.10 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.5.10: Streams known-size Restic objects directly to pCloud with bounded concurrency and cached remote folders, avoiding the previous write-then-reread staging path while retaining a safe fallback for unknown-length uploads.
 - v0.5.9: Adds detailed live Restic status including phase, elapsed time, current and average speed, ETA, current and recent files, last activity time, and captured backup errors.
 - v0.5.8: Adds Restic encrypted repositories, retention and integrity operations, encrypted cloud indexes, snapshot browsing, file and folder downloads, isolated NAS restores, `/vol2` source support, and full-fidelity defaults with no implicit exclusions.
 - v0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue is still reporting the active task. Completed file stats now display `同步完成` instead of staying on `同步中`.

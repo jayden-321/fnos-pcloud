@@ -1,5 +1,5 @@
 appname=pcloud-nas-sync
-version=0.5.9
+version=0.5.10
 display_name=pCloud NAS Sync
 desc=Encrypted Restic backups from fnOS to pCloud with snapshot browsing, file download, folder ZIP, repository checks, retention, and isolated NAS restore.
 platform=all
@@ -15,4 +15,4 @@ service_port=17880
 checkport=true
 ctl_stop=true
 disable_authorization_path=false
-changelog=0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue still reports the active task. Completed file stats now display sync completed instead of staying on syncing.<br>0.4.8: Adds decrypted folder downloads in Decrypt Browse. The app recursively lists encrypted pCloud folders, downloads .pcenc files, decrypts them locally with /data/encryption.key, and returns a zip with the original folder structure.<br>0.4.7: Removes the live upload-speed metric from the Sync Tasks dashboard so the top summary no longer shows a persistent 0 B/s card. The separate pCloud speed test still reports upload/download throughput.<br>0.4.6: Adds a Decrypt Browse tab and Settings key export for encrypted pCloud files.
+changelog=0.5.10: Streams known-size Restic objects directly to pCloud with bounded concurrency and cached remote folders, while retaining a safe staged fallback.<br>0.5.9: Adds detailed live Restic progress including phase, speed, ETA, current files, and errors.<br>0.5.8: Adds encrypted Restic repositories, retention, integrity checks, snapshot browsing, downloads, ZIP export, and isolated restore.<br>0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue still reports the active task.

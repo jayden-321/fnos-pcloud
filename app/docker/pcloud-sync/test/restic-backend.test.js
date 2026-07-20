@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { ResticPCloudBackend } from '../src/restic/backend.js';
 
-test('Restic pCloud backend stages uploads and supports v2 list, range reads, and deletes', async () => {
+test('Restic pCloud backend streams bounded concurrent uploads and supports v2 list, range reads, and deletes', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'restic-backend-'));
   const objects = new Map();
   let activeUploads = 0;
@@ -28,12 +29,16 @@ test('Restic pCloud backend stages uploads and supports v2 list, range reads, an
   const fakeClient = {
     hostname: downloadBase,
     ensureFolder: async (remotePath) => ({ folderid: remotePath }),
-    uploadFile: async ({ filePath, filename, folderid }) => {
+    uploadStream: async ({ stream, size, filename, folderid }) => {
       activeUploads += 1;
       maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
       try {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        objects.set(`${folderid}/${filename}`, await readFile(filePath));
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+        const body = Buffer.concat(chunks);
+        assert.equal(body.length, size);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        objects.set(`${folderid}/${filename}`, body);
         return {};
       } finally {
         activeUploads -= 1;
@@ -57,7 +62,7 @@ test('Restic pCloud backend stages uploads and supports v2 list, range reads, an
       tasks: [{ id: 'test', mode: 'restic', localPath: '/vol1/test', remotePath: '/repo/test' }]
     })
   };
-  const backend = new ResticPCloudBackend({ store, dataDir, port: 0, pcloudFactory: () => fakeClient });
+  const backend = new ResticPCloudBackend({ store, dataDir, port: 0, uploadConcurrency: 2, pcloudFactory: () => fakeClient });
   await backend.start();
   backend.port = backend.server.address().port;
   const base = backend.repositoryUrl('test').replace(/^rest:/, '');
@@ -73,15 +78,39 @@ test('Restic pCloud backend stages uploads and supports v2 list, range reads, an
     const ranged = await fetch(`${base}data/${name}`, { headers: { range: 'bytes=6-' } });
     assert.equal(ranged.status, 206);
     assert.equal(await ranged.text(), 'restic');
-    await Promise.all([
-      fetch(`${base}data/bbcdef1234`, { method: 'POST', body: 'second' }),
-      fetch(`${base}data/cccdef1234`, { method: 'POST', body: 'third' })
-    ]);
-    assert.equal(maxActiveUploads, 1);
+    await Promise.all(['bb00000001', 'bb00000002', 'bb00000003', 'bb00000004', 'bb00000005'].map((item, index) => (
+      fetch(`${base}data/${item}`, { method: 'POST', body: `body-${index}` })
+    )));
+    assert.equal(maxActiveUploads, 2);
+    assert.deepEqual(await readdir(path.join(dataDir, 'restic', 'backend-upload')), []);
     assert.equal((await fetch(`${base}data/${name}`, { method: 'DELETE' })).status, 200);
     assert.equal(objects.has(`/repo/test/data/ab/${name}`), false);
   } finally {
     await backend.stop();
     downloadServer.close();
+  }
+});
+
+test('Restic pCloud backend falls back to a staged upload when request length is unavailable', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'restic-backend-fallback-'));
+  let uploaded = '';
+  const fakeClient = {
+    ensureFolder: async (remotePath) => ({ folderid: remotePath }),
+    uploadFile: async ({ filePath }) => {
+      uploaded = await readFile(filePath, 'utf8');
+      return {};
+    }
+  };
+  const store = { dataDir, loadConfig: async () => ({ tasks: [] }) };
+  const backend = new ResticPCloudBackend({ store, dataDir, port: 0, pcloudFactory: () => fakeClient });
+  await backend.start();
+  const source = Readable.from(['fallback-body']);
+  source.headers = {};
+  try {
+    await backend.uploadObject(source, fakeClient, '/repo/test/data/fa/fallback');
+    assert.equal(uploaded, 'fallback-body');
+    assert.deepEqual(await readdir(path.join(dataDir, 'restic', 'backend-upload')), []);
+  } finally {
+    await backend.stop();
   }
 });

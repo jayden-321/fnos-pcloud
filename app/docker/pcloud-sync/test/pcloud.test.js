@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { PCloudClient, validatePCloudHostname } from '../src/pcloud/client.js';
 
 async function withServer(handler) {
@@ -279,6 +280,40 @@ test('PCloudClient streams uploadfile multipart with nopartial and mtime', async
     assert.match(body, /progress-123/);
     assert.match(body, /filename="a.txt"/);
     assert.match(body, /hello/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('PCloudClient uploads a known-size readable without staging it as a file', async () => {
+  let body = '';
+  let headers = {};
+  const server = await withServer((req, res) => {
+    headers = req.headers;
+    req.setEncoding('binary');
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ result: 0, fileids: [18], metadata: [{ fileid: 18, name: 'stream.bin' }] }));
+    });
+  });
+
+  try {
+    const client = new PCloudClient({ hostname: server.baseUrl, accessToken: 'token' });
+    const result = await client.uploadStream({
+      stream: Readable.from([Buffer.from('stream-body')]),
+      size: 11,
+      filename: 'stream.bin',
+      folderid: 42
+    });
+
+    assert.equal(result.fileids[0], 18);
+    assert.ok(Number(headers['content-length']) > 11);
+    assert.equal(headers['transfer-encoding'], undefined);
+    assert.match(body, /filename="stream.bin"/);
+    assert.match(body, /stream-body/);
   } finally {
     await server.close();
   }
