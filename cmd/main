@@ -1,20 +1,14 @@
 #!/bin/bash
 
-FILE_PATH="${TRIM_APPDEST}/docker/docker-compose.yaml"
+SERVICE_PORT="${TRIM_SERVICE_PORT:-17880}"
+ERROR_LOG="${TRIM_TEMP_LOGFILE:-/tmp/pcloud-nas-sync-error.log}"
 
-is_docker_running() {
-    DOCKER_NAME=""
-
-    if [ -f "$FILE_PATH" ]; then
-        DOCKER_NAME=$(grep "container_name" "$FILE_PATH" | awk -F ':' '{print $2}' | xargs)
-    fi
-
-    if [ -n "$DOCKER_NAME" ]; then
-        docker inspect "$DOCKER_NAME" | grep -q "\"Status\": \"running\"," || exit 1
+is_healthy() {
+    if command -v curl >/dev/null 2>&1; then
+        curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${SERVICE_PORT}/api/status" >/dev/null 2>&1
         return
     fi
-
-    exit 1
+    return 1
 }
 
 case "$1" in
@@ -25,9 +19,10 @@ stop)
     exit 0
     ;;
 status)
-    if is_docker_running; then
+    if is_healthy; then
         exit 0
     else
+        echo "pCloud NAS Sync 未通过本机健康检查，请检查应用任务日志。" > "$ERROR_LOG"
         exit 3
     fi
     ;;
@@ -35,4 +30,3 @@ status)
     exit 1
     ;;
 esac
-

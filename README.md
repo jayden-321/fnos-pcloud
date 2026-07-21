@@ -93,24 +93,32 @@ repository, so completed data blocks are not blindly uploaded a second time.
 
 ## NAS Folder Mounts
 
-The default Docker Compose file mounts `/vol1` and `/vol2` read-only and exposes
-a dedicated writable restore directory:
+The package no longer exposes complete NAS volumes by default. Under 小皓OS,
+the installation plan maps every selected source below `/sources` as read-only
+and maps the separately selected restore directory to `/restore` as read-write.
+The app folder picker is restricted to `/sources` when that managed environment
+is present.
+
+For a direct fnOS FPK installation, explicitly set one authorized source root
+and a separate restore directory. The defaults stay inside the app home:
 
 ```yaml
 volumes:
-  - "/vol1:/vol1:ro"
-  - "/vol2:/vol2:ro"
-  - "${RESTIC_RESTORE_DIR:-/vol1/1000/pcloudbackups/restic-restore}:/restore"
+  - "${PCLOUD_SOURCE_DIR:-${TRIM_PKGHOME:-./data}/sources}:/sources:ro"
+  - "${RESTIC_RESTORE_DIR:-${TRIM_PKGHOME:-./data}/restore}:/restore"
 ```
 
-If your sync folders are on another volume, add the matching read-only mount in `app/docker/docker-compose.yaml`, for example:
+Do not mount `/vol1`, `/vol2`, or another complete storage space. Select the
+narrowest source directory needed. Inside the app, configure paths below
+`/sources`; restores are always constrained below `/restore`.
 
-```yaml
-volumes:
-  - "/vol3:/vol3:ro"
-```
+## 小皓OS App Contract
 
-The UI folder picker can browse paths that are visible inside the container, such as `/vol1/1000/photos` and `/vol2/1000/honvin`. Add more read-only volume mounts if you need to browse other NAS volumes. Set `RESTIC_RESTORE_DIR` to change the host directory that receives isolated restores.
+`xiaohao-app.json` declares the Compose project, loopback-proxied Web entry,
+outbound network access, multiple read-only backup sources, one writable restore
+share, and the `/api/status` health check. Runtime state remains under `/data`,
+which 小皓OS maps to the App `var` role. The package does not request root,
+Docker socket access, host networking, devices, or supplementary groups.
 
 ## Base Image
 
@@ -160,15 +168,16 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.5.10 is a backup application, not a two-way sync client.
+- v0.5.11 is a backup application, not a two-way sync client.
 - Legacy upload tasks do not propagate local deletions to pCloud.
-- v0.5.10 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.5.11 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.5.11: Streams Restic JSON progress line by line without retaining or repeatedly measuring the complete output, preventing Node CPU usage from increasing throughout long backups.
 - v0.5.10: Streams known-size Restic objects directly to pCloud with bounded concurrency and cached remote folders, avoiding the previous write-then-reread staging path while retaining a safe fallback for unknown-length uploads.
 - v0.5.9: Adds detailed live Restic status including phase, elapsed time, current and average speed, ETA, current and recent files, last activity time, and captured backup errors.
 - v0.5.8: Adds Restic encrypted repositories, retention and integrity operations, encrypted cloud indexes, snapshot browsing, file and folder downloads, isolated NAS restores, `/vol2` source support, and full-fidelity defaults with no implicit exclusions.

@@ -51,3 +51,10 @@ ports:
 
 Set `TRIM_SERVICE_BIND=127.0.0.1` only when a separate host-local reverse proxy
 is handling access and direct fnOS iframe launch is not required.
+
+## Storage Access
+
+The package must not receive an entire NAS storage space. 小皓OS mounts only the
+directories selected in the installation plan below `/sources` as read-only and
+uses a separate writable `/restore` mount. Direct fnOS installations must set
+`PCLOUD_SOURCE_DIR` and `RESTIC_RESTORE_DIR` to equally narrow directories.

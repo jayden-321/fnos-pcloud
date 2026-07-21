@@ -1,5 +1,5 @@
 appname=pcloud-nas-sync
-version=0.5.10
+version=0.5.11
 display_name=pCloud NAS Sync
 desc=Encrypted Restic backups from fnOS to pCloud with snapshot browsing, file download, folder ZIP, repository checks, retention, and isolated NAS restore.
 platform=all
@@ -15,4 +15,4 @@ service_port=17880
 checkport=true
 ctl_stop=true
 disable_authorization_path=false
-changelog=0.5.10: Streams known-size Restic objects directly to pCloud with bounded concurrency and cached remote folders, while retaining a safe staged fallback.<br>0.5.9: Adds detailed live Restic progress including phase, speed, ETA, current files, and errors.<br>0.5.8: Adds encrypted Restic repositories, retention, integrity checks, snapshot browsing, downloads, ZIP export, and isolated restore.<br>0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue still reports the active task.
+changelog=0.5.11: Streams Restic JSON progress without retaining or repeatedly rescanning the full output, preventing Node CPU usage from growing during long backups.<br>0.5.10: Streams known-size Restic objects directly to pCloud with bounded concurrency and cached remote folders, while retaining a safe staged fallback.<br>0.5.9: Adds detailed live Restic progress including phase, speed, ETA, current files, and errors.<br>0.5.8: Adds encrypted Restic repositories, retention, integrity checks, snapshot browsing, downloads, ZIP export, and isolated restore.<br>0.4.9: Fixes task card status when a long scan has already uploaded every file but the queue still reports the active task.

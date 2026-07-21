@@ -1,8 +1,7 @@
 {
   "defaults": {
-    "run-as": "root"
+    "run-as": "package"
   },
   "username": "pcloud_sync",
   "groupname": "pcloud_sync"
 }
-

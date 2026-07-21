@@ -53,7 +53,10 @@ export function defaultLocalRoots(extraRoots = []) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-  return normalizeRoots([...envRoots, ...extraRoots, ...DEFAULT_ROOTS]);
+  if (envRoots.length > 0) {
+    return normalizeRoots([...envRoots, ...extraRoots]);
+  }
+  return normalizeRoots([...extraRoots, ...DEFAULT_ROOTS]);
 }
 
 function normalizeRoots(roots) {
