@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ResticService } from '../src/restic/service.js';
+import { defaultRunCommand, ResticService } from '../src/restic/service.js';
 import { SqliteStore } from '../src/store/sqliteStore.js';
 import { createApp } from '../src/web/server.js';
 
@@ -29,6 +29,29 @@ async function fixture(runCommand, { ignorePatterns = ['custom.tmp'] } = {}) {
   await service.ensureDirectories();
   return { service, store, dataDir, sourceRoot, restoreRoot };
 }
+
+test('defaultRunCommand streams large line output without retaining it', async () => {
+  const lineCount = 4096;
+  let received = 0;
+  const script = `const line = 'x'.repeat(4095) + '\\n'; for (let i = 0; i < ${lineCount}; i += 1) process.stdout.write(line);`;
+
+  const result = await defaultRunCommand(process.execPath, ['-e', script], {
+    maxOutputBytes: 64 * 1024 * 1024,
+    onStdoutLine: () => { received += 1; }
+  });
+
+  assert.equal(received, lineCount);
+  assert.equal(result.stdout, '');
+});
+
+test('defaultRunCommand bounds captured output without rescanning accumulated strings', async () => {
+  const maxOutputBytes = 64 * 1024;
+  const result = await defaultRunCommand(process.execPath, ['-e', "process.stdout.write('x'.repeat(256 * 1024))"], {
+    maxOutputBytes
+  });
+
+  assert.equal(Buffer.byteLength(result.stdout), maxOutputBytes);
+});
 
 test('ResticService initializes a repository, reports backup progress, and applies retention', async () => {
   const calls = [];

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 import { normalizeConfig } from '../config/config.js';
 import { writeStoredZip } from '../archive/zip.js';
@@ -499,7 +500,7 @@ export function fileStreamWithCleanup(filePath, tempDir) {
   return Readable.toWeb(source);
 }
 
-async function defaultRunCommand(command, args, options = {}) {
+export async function defaultRunCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -508,39 +509,51 @@ async function defaultRunCommand(command, args, options = {}) {
     });
     options.onChild?.(child);
     const max = Number(options.maxOutputBytes || 16 * 1024 * 1024);
-    let stdout = '';
-    let stderr = '';
-    let stdoutPending = '';
-    let stderrPending = '';
+    const stdout = createBoundedOutput(max, options.captureStdout ?? !options.onStdoutLine);
+    const stderr = createBoundedOutput(max, options.captureStderr ?? true);
+    const stdoutLines = options.onStdoutLine
+      ? createInterface({ input: child.stdout, crlfDelay: Infinity })
+      : null;
+    const stderrLines = options.onStderrLine
+      ? createInterface({ input: child.stderr, crlfDelay: Infinity })
+      : null;
+    stdoutLines?.on('line', options.onStdoutLine);
+    stderrLines?.on('line', options.onStderrLine);
     child.stdout.on('data', (chunk) => {
-      if (Buffer.byteLength(stdout) < max) stdout += chunk;
-      if (options.onStdoutLine) {
-        stdoutPending += chunk;
-        const lines = stdoutPending.split(/\r?\n/);
-        stdoutPending = lines.pop() || '';
-        for (const line of lines) options.onStdoutLine(line);
-      }
+      stdout.append(chunk);
     });
     child.stderr.on('data', (chunk) => {
-      if (Buffer.byteLength(stderr) < max) stderr += chunk;
-      if (options.onStderrLine) {
-        stderrPending += chunk;
-        const lines = stderrPending.split(/\r?\n/);
-        stderrPending = lines.pop() || '';
-        for (const line of lines) options.onStderrLine(line);
-      }
+      stderr.append(chunk);
     });
     child.on('error', reject);
     child.on('close', (code, signal) => {
-      if (stdoutPending && options.onStdoutLine) options.onStdoutLine(stdoutPending);
-      if (stderrPending && options.onStderrLine) options.onStderrLine(stderrPending);
+      const stdoutText = stdout.text();
+      const stderrText = stderr.text();
       const allowed = options.allowExitCodes || [0];
-      if (allowed.includes(code)) return resolve({ code, stdout, stderr, signal });
-      const error = new Error((stderr || stdout || `${command} exited with code ${code}`).trim());
+      if (allowed.includes(code)) return resolve({ code, stdout: stdoutText, stderr: stderrText, signal });
+      const error = new Error((stderrText || stdoutText || `${command} exited with code ${code}`).trim());
       error.exitCode = code;
       reject(error);
     });
   });
+}
+
+function createBoundedOutput(maxBytes, enabled) {
+  const chunks = [];
+  let bytes = 0;
+  return {
+    append(chunk) {
+      if (!enabled || bytes >= maxBytes) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = maxBytes - bytes;
+      const captured = buffer.length <= remaining ? buffer : buffer.subarray(0, remaining);
+      chunks.push(captured);
+      bytes += captured.length;
+    },
+    text() {
+      return chunks.length ? Buffer.concat(chunks, bytes).toString('utf8') : '';
+    }
+  };
 }
 
 function snapshotPathFor(task, relative) {

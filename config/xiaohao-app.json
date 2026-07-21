@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "pcloud-nas-sync",
+  "version": "0.5.11",
+  "displayName": "pCloud NAS Sync",
+  "description": "将选定的 NAS 目录加密备份到 pCloud，并支持快照浏览、校验和隔离恢复。",
+  "publisher": "pCloud NAS Sync Community",
+  "architectures": ["amd64"],
+  "runtime": "docker-compose",
+  "projects": [
+    {
+      "id": "pcloud-nas-sync",
+      "composePath": "app/docker/docker-compose.yaml"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "main",
+      "type": "web",
+      "title": "pCloud NAS Sync",
+      "path": "/",
+      "port": 17880
+    }
+  ],
+  "permissions": {
+    "networkOutbound": true,
+    "shares": [
+      {
+        "id": "restore-output",
+        "access": "read-write",
+        "target": "/restore",
+        "description": "只用于写入用户主动发起的隔离恢复结果。"
+      }
+    ],
+    "accessiblePaths": [
+      {
+        "id": "backup-sources",
+        "access": "read-only",
+        "target": "/sources",
+        "multiple": true,
+        "description": "用户明确选择的备份源目录；应用不能修改或删除源文件。"
+      }
+    ],
+    "devices": [],
+    "supplementaryGroups": []
+  },
+  "health": {
+    "type": "http",
+    "path": "/api/status",
+    "timeoutSeconds": 60
+  }
+}
