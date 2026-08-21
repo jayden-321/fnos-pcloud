@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { defaultRunCommand, ResticService } from '../src/restic/service.js';
 import { SqliteStore } from '../src/store/sqliteStore.js';
+import { resticTaskKey } from '../src/restic/taskKey.js';
 import { createApp } from '../src/web/server.js';
 
 async function fixture(runCommand, { ignorePatterns = ['custom.tmp'] } = {}) {
@@ -51,6 +52,24 @@ test('defaultRunCommand bounds captured output without rescanning accumulated st
   });
 
   assert.equal(Buffer.byteLength(result.stdout), maxOutputBytes);
+});
+
+test('defaultRunCommand strips terminal controls and unwraps structured command errors', async () => {
+  const script = [
+    "process.stderr.write('\\u001b[2Ksignal terminated received, cleaning up\\n')",
+    "process.stderr.write(JSON.stringify({ message_type: 'exit_error', code: 1, message: 'Fatal: unable to save snapshot: context canceled' }) + '\\n')",
+    'process.exit(1)'
+  ].join(';');
+
+  await assert.rejects(
+    defaultRunCommand(process.execPath, ['-e', script]),
+    (error) => {
+      assert.equal(error.message, 'Fatal: unable to save snapshot: context canceled');
+      assert.equal(error.message.includes('\u001b'), false);
+      assert.equal(error.message.includes('message_type'), false);
+      return true;
+    }
+  );
 });
 
 test('ResticService initializes a repository, reports backup progress, and applies retention', async () => {
@@ -101,6 +120,81 @@ test('ResticService initializes a repository, reports backup progress, and appli
   assert.ok(calls.some(([, args]) => args.includes('forget') && args.includes('--keep-monthly')));
 });
 
+test('ResticService initializes a missing Restic 0.18 repository when the probe exits with code 1', async () => {
+  const calls = [];
+  let firstProbe = true;
+  const { service } = await fixture(async (command, args) => {
+    calls.push([command, args]);
+    if (args.includes('snapshots') && firstProbe) {
+      firstProbe = false;
+      return {
+        code: 1,
+        stdout: '',
+        stderr: 'Fatal: repository does not exist: unable to open config file: <config/> does not exist Is there a repository at the following location?'
+      };
+    }
+    return { code: 0, stdout: args.includes('snapshots') ? '[]' : '', stderr: '' };
+  });
+  await service.setPassword('honvin', 'a-strong-test-password');
+
+  await service.startBackup('honvin');
+  const finished = await service.waitForIdle();
+
+  assert.equal(finished.active, false);
+  assert.equal(finished.error, '');
+  assert.ok(calls.some(([, args]) => args.includes('init') && args.includes('--repository-version')));
+  assert.ok(calls.some(([, args]) => args.includes('backup')));
+});
+
+test('ResticService does not initialize a repository for unrelated probe failures', async () => {
+  const calls = [];
+  const { service } = await fixture(async (command, args) => {
+    calls.push([command, args]);
+    if (args.includes('snapshots')) {
+      return { code: 1, stdout: '', stderr: 'Fatal: connection refused by backend' };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  await service.setPassword('honvin', 'a-strong-test-password');
+
+  await service.startBackup('honvin');
+  const finished = await service.waitForIdle();
+
+  assert.match(finished.error, /connection refused by backend/);
+  assert.equal(calls.some(([, args]) => args.includes('init')), false);
+  assert.equal(calls.some(([, args]) => args.includes('backup')), false);
+});
+
+test('ResticService rejects a missing task password before marking the backup active', async () => {
+  let commands = 0;
+  const { service } = await fixture(async () => {
+    commands += 1;
+    return { code: 0, stdout: '', stderr: '' };
+  });
+
+  await assert.rejects(service.startBackup('honvin'), /请先为该任务设置 Restic 密码/);
+
+  assert.deepEqual(service.getStatus(), { active: false });
+  assert.equal(commands, 0);
+});
+
+test('ResticService saves and detects a password for a Chinese task id', async () => {
+  const { service, store, dataDir } = await fixture(async () => ({ code: 0, stdout: '', stderr: '' }));
+  const config = await store.loadConfig();
+  config.tasks[0].id = '永久存档';
+  config.tasks[0].name = '永久存档';
+  await store.saveConfig(config);
+
+  await service.setPassword('永久存档', 'a-strong-test-password');
+
+  const [taskStatus] = await service.taskStatuses();
+  assert.equal(taskStatus.passwordConfigured, true);
+  assert.equal(
+    (await readFile(path.join(dataDir, 'restic', 'secrets', `${resticTaskKey('永久存档')}.password`), 'utf8')).trim(),
+    'a-strong-test-password'
+  );
+});
+
 test('ResticService backs up honvin without any exclude arguments by default', async () => {
   const calls = [];
   const { service, sourceRoot } = await fixture(async (command, args) => {
@@ -137,6 +231,40 @@ test('ResticService turns only explicit ignore patterns into exclude arguments',
   const backupArgs = calls.find(([command, args]) => command === 'restic' && args.includes('backup'))?.[1];
   const excludes = backupArgs.flatMap((value, index) => value === '--exclude' ? [backupArgs[index + 1]] : []);
   assert.deepEqual(excludes, ['*.tmp', 'cache/**']);
+});
+
+test('ResticService reports a manually terminated backup as stopped instead of failed', async () => {
+  let backupStartedResolve;
+  const backupStarted = new Promise((resolve) => { backupStartedResolve = resolve; });
+  const { service } = await fixture(async (_command, args, options) => {
+    if (args.includes('snapshots')) return { code: 0, stdout: '[]', stderr: '' };
+    if (!args.includes('backup')) return { code: 0, stdout: '', stderr: '' };
+    return new Promise((_resolve, reject) => {
+      options.onChild?.({
+        kill(signal) {
+          const error = new Error('\u001b[2Ksignal terminated received, cleaning up\n{"message_type":"exit_error","code":1,"message":"Fatal: unable to save snapshot: context canceled"}');
+          error.signal = signal;
+          reject(error);
+        }
+      });
+      backupStartedResolve();
+    });
+  });
+  await service.setPassword('honvin', 'a-strong-test-password');
+
+  const started = await service.startBackup('honvin');
+  await backupStarted;
+  const stopping = service.stopJob();
+  const finished = await service.waitForIdle();
+
+  assert.equal(started.active, true);
+  assert.deepEqual(stopping, { stopping: true });
+  assert.equal(finished.active, false);
+  assert.equal(finished.stopping, false);
+  assert.equal(finished.stopped, true);
+  assert.equal(finished.phase, 'stopped');
+  assert.equal(finished.error, '');
+  assert.equal(finished.result?.message, '已由用户停止，本次未创建快照');
 });
 
 test('ResticService lists plaintext snapshot entries without recursive traversal', async () => {

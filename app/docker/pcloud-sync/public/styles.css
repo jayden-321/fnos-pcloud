@@ -304,6 +304,26 @@ label {
   font-weight: 500;
 }
 
+.restic-password-status {
+  display: block;
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.restic-password-status[data-status="saved"] {
+  color: #137a45;
+}
+
+.restic-password-status[data-status="saving"] {
+  color: #356a9a;
+}
+
+.restic-password-status[data-status="error"] {
+  color: #b42318;
+}
+
 input,
 select,
 textarea {

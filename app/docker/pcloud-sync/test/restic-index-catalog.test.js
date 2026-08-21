@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ResticIndexCatalog } from '../src/restic/indexCatalog.js';
+import { resticTaskKey } from '../src/restic/taskKey.js';
 import { SqliteStore } from '../src/store/sqliteStore.js';
 
 test('encrypted cloud index restores a snapshot directory into an empty local cache', async () => {
@@ -70,8 +71,29 @@ test('encrypted cloud index restores a snapshot directory into an empty local ca
   assert.equal((await targetStore.getResticIndexState(task.id)).status, 'ready');
 });
 
+test('cloud index lookup recognizes the shared password path for a Chinese task id', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'restic-index-chinese-task-'));
+  const store = new SqliteStore(dataDir);
+  await store.init();
+  const task = {
+    id: '永久存档', name: '永久存档', mode: 'restic', localPath: '/vol2/1000/永久存档',
+    remotePath: '/mybackup/永久存档'
+  };
+  const config = { pcloud: { accessToken: 'token' }, tasks: [task] };
+  await store.saveConfig(config);
+  await savePassword(dataDir, task.id, 'test-restic-password');
+  const client = {
+    downloadFile: async () => {
+      throw Object.assign(new Error('not found'), { result: 2005 });
+    }
+  };
+  const catalog = new ResticIndexCatalog({ store, dataDir, pcloudFactory: () => client });
+
+  assert.deepEqual(await catalog.reconcile(task, config), { status: 'missing-cloud-index' });
+});
+
 async function savePassword(dataDir, taskId, password) {
   const directory = path.join(dataDir, 'restic', 'secrets');
   await mkdir(directory, { recursive: true });
-  await writeFile(path.join(directory, `${taskId}.password`), `${password}\n`, { mode: 0o600 });
+  await writeFile(path.join(directory, `${resticTaskKey(taskId)}.password`), `${password}\n`, { mode: 0o600 });
 }

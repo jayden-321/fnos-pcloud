@@ -1,4 +1,12 @@
 import { eventToLogRow, fileLogEvents, uploadToLogRow } from './logRows.js';
+import {
+  beginResticFolderRequest,
+  beginResticSnapshotRequest,
+  createResticBrowserState,
+  isCurrentResticFolderRequest,
+  isCurrentResticSnapshotRequest,
+  selectResticTask
+} from './resticSelection.js';
 import { taskStatusText } from './taskStatus.js';
 
 const TOKEN_MASK = '******';
@@ -13,15 +21,7 @@ let currentStatus = null;
 let currentEvents = [];
 let folderPicker = null;
 
-const resticBrowser = {
-  taskId: '',
-  snapshot: '',
-  path: '',
-  parent: null,
-  entries: [],
-  snapshots: [],
-  indexSnapshotId: ''
-};
+const resticBrowser = createResticBrowserState();
 
 const fields = {
   hostname: form.elements.hostname,
@@ -55,7 +55,12 @@ const resticControls = {
   jobDetails: document.querySelector('#resticJobDetails'),
   indexStatus: document.querySelector('#resticIndexStatus'),
   up: document.querySelector('#resticUp'),
-  stop: document.querySelector('#resticStop')
+  stop: document.querySelector('#resticStop'),
+  backup: document.querySelector('#resticBackup'),
+  check: document.querySelector('#resticCheck'),
+  prune: document.querySelector('#resticPrune'),
+  rebuildIndex: document.querySelector('#resticRebuildIndex'),
+  exportRecovery: document.querySelector('#resticExportRecovery')
 };
 
 for (const control of Object.values(eventFilters)) {
@@ -174,14 +179,24 @@ taskEditors.addEventListener('click', async (event) => {
     await openFolderPicker({ kind: 'remote', index, initialPath: editor.querySelector('[name="remotePath"]').value });
   }
   if (action === 'set-restic-password') {
-    await saveConfig();
-    const refreshed = taskEditors.querySelector(`.task-editor[data-index="${index}"]`);
-    const taskId = refreshed.querySelector('[name="id"]').value;
-    const password = refreshed.querySelector('[name="resticPassword"]').value;
-    await post('/api/restic/password', { taskId, password });
-    refreshed.querySelector('[name="resticPassword"]').value = '';
-    await refreshStatus();
-    show('Restic 密码已安全保存');
+    const password = editor.querySelector('[name="resticPassword"]').value;
+    let statusEditor = editor;
+    setResticPasswordStatus(statusEditor, 'saving');
+    try {
+      await saveConfig();
+      const refreshed = taskEditors.querySelector(`.task-editor[data-index="${index}"]`);
+      statusEditor = refreshed;
+      setResticPasswordStatus(statusEditor, 'saving');
+      const taskId = refreshed.querySelector('[name="id"]').value;
+      await post('/api/restic/password', { taskId, password });
+      refreshed.querySelector('[name="resticPassword"]').value = '';
+      await refreshStatus();
+      setResticPasswordStatus(statusEditor, 'saved');
+      show('Restic 密码已安全保存');
+    } catch (error) {
+      setResticPasswordStatus(statusEditor, 'error', error.message);
+      show(`保存 Restic 密码失败：${error.message}`);
+    }
   }
 });
 
@@ -218,9 +233,9 @@ document.querySelector('#folderEntries').addEventListener('click', async (event)
 });
 
 resticControls.task.addEventListener('change', async () => {
-  resticBrowser.taskId = resticControls.task.value;
-  resticBrowser.path = '';
-  resticBrowser.indexSnapshotId = '';
+  selectResticTask(resticBrowser, resticControls.task.value);
+  renderResticTaskPlaceholder('正在加载所选任务的快照');
+  renderResticJob();
   await loadResticSnapshots();
 });
 resticControls.snapshot.addEventListener('change', async () => {
@@ -353,8 +368,9 @@ async function refreshStatus() {
   updateTaskOptions(currentLogRows());
   renderEvents();
   renderTaskCards();
-  renderResticJob();
+  updateResticPasswordStatuses();
   updateResticTaskOptions();
+  renderResticJob();
   const index = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId)?.index;
   if (index?.status === 'ready' && index.activeSnapshotId && index.activeSnapshotId !== resticBrowser.indexSnapshotId) {
     resticBrowser.indexSnapshotId = index.activeSnapshotId;
@@ -436,11 +452,15 @@ function renderTaskCards() {
 function renderResticTaskCard(task) {
   const resticTask = (currentStatus?.resticTasks || []).find((item) => item.taskId === task.id);
   const password = resticTask?.passwordConfigured;
-  const active = currentStatus?.restic?.active && currentStatus.restic.taskId === task.id;
+  const job = currentStatus?.restic || {};
+  const selected = job.taskId === task.id;
+  const active = job.active && selected;
   const status = active
-    ? `${resticActionText(currentStatus.restic.action)} ${currentStatus.restic.percent || 0}%`
-    : currentStatus?.restic?.taskId === task.id && currentStatus.restic.error
-      ? `失败：${currentStatus.restic.error}`
+    ? job.stopping ? '正在停止' : `${resticActionText(job.action)} ${job.percent || 0}%`
+    : selected && job.stopped
+      ? job.result?.message || '已由用户停止，本次未创建快照'
+      : selected && job.error
+        ? `失败：${job.error}`
       : password ? '已就绪' : '需要设置 Restic 密码';
   return `
     <article class="task-card">
@@ -692,6 +712,7 @@ function addTaskEditor(task = {}) {
           <input name="resticPassword" type="password" autocomplete="new-password" placeholder="至少 12 个字符；留空不会修改">
           <button data-action="set-restic-password" type="button">保存密码</button>
         </div>
+        <small class="restic-password-status" data-restic-password-status aria-live="polite"></small>
       </label>
       <small class="field-note">密码不写入任务配置。丢失密码将无法恢复备份，请在 Restic 仓库页导出恢复信息并离线保存。</small>
     </section>
@@ -727,6 +748,42 @@ function addTaskEditor(task = {}) {
   editor.querySelector('[name="mode"]').addEventListener('change', () => updateTaskModeVisibility(editor));
   updateScheduleVisibility(editor);
   updateTaskModeVisibility(editor);
+  updateResticPasswordStatus(editor);
+}
+
+function updateResticPasswordStatuses() {
+  for (const editor of taskEditors.querySelectorAll('.task-editor')) {
+    const status = editor.querySelector('[data-restic-password-status]');
+    if (status?.dataset.status === 'saving' || status?.dataset.status === 'error') continue;
+    updateResticPasswordStatus(editor);
+  }
+}
+
+function updateResticPasswordStatus(editor) {
+  const taskId = editor.querySelector('[name="id"]')?.value || '';
+  if (!taskId || !currentStatus) {
+    setResticPasswordStatus(editor, 'checking');
+    return;
+  }
+  const taskStatus = (currentStatus.resticTasks || []).find((item) => item.taskId === taskId);
+  setResticPasswordStatus(editor, taskStatus?.passwordConfigured ? 'saved' : 'missing');
+}
+
+function setResticPasswordStatus(editor, status, detail = '') {
+  const output = editor?.querySelector('[data-restic-password-status]');
+  if (!output) return;
+  output.dataset.status = status;
+  output.textContent = status === 'saved'
+    ? '✓ 密码已保存'
+    : status === 'missing'
+      ? '尚未保存密码'
+      : status === 'saving'
+        ? '正在保存密码…'
+        : status === 'error'
+          ? `保存失败：${detail}`
+          : '正在检查密码状态…';
+  const button = editor.querySelector('[data-action="set-restic-password"]');
+  if (button) button.disabled = status === 'saving';
 }
 
 function collectTaskEditors() {
@@ -907,16 +964,22 @@ function updateResticTaskOptions() {
   resticControls.task.innerHTML = tasks.length
     ? tasks.map((task) => `<option value="${escapeHtml(task.id)}">${escapeHtml(task.name)}</option>`).join('')
     : '<option value="">没有 Restic 任务</option>';
-  resticBrowser.taskId = tasks.some((task) => task.id === selected) ? selected : tasks[0]?.id || '';
+  const nextTaskId = tasks.some((task) => task.id === selected) ? selected : tasks[0]?.id || '';
+  selectResticTask(resticBrowser, nextTaskId);
   resticControls.task.value = resticBrowser.taskId;
 }
 
 async function loadResticSnapshots() {
   updateResticTaskOptions();
-  if (!resticBrowser.taskId) return;
-  const body = await get(`/api/restic/snapshots?taskId=${encodeURIComponent(resticBrowser.taskId)}`);
+  if (!resticBrowser.taskId) {
+    renderResticTaskPlaceholder('请先创建 Restic 任务');
+    return;
+  }
+  const request = beginResticSnapshotRequest(resticBrowser);
+  const body = await get(`/api/restic/snapshots?taskId=${encodeURIComponent(request.taskId)}`);
+  if (!isCurrentResticSnapshotRequest(resticBrowser, request)) return;
   resticBrowser.snapshots = body.snapshots || [];
-  const index = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId)?.index;
+  const index = (currentStatus?.resticTasks || []).find((item) => item.taskId === request.taskId)?.index;
   if (index?.activeSnapshotId) resticBrowser.indexSnapshotId = index.activeSnapshotId;
   resticControls.snapshot.innerHTML = resticBrowser.snapshots.map((snapshot) => `
     <option value="${escapeHtml(snapshot.id)}">${escapeHtml(formatDateTime(snapshot.time))} · ${escapeHtml(snapshot.shortId)}</option>
@@ -931,14 +994,16 @@ async function loadResticSnapshots() {
 }
 
 async function loadResticFolder(relativePath = '') {
-  if (!resticBrowser.taskId || !resticBrowser.snapshot) return;
+  const request = beginResticFolderRequest(resticBrowser, relativePath);
+  if (!request.taskId || !request.snapshot) return;
   resticControls.rows.innerHTML = '<tr><td colspan="5" class="empty">正在读取目录索引</td></tr>';
   const query = new URLSearchParams({
-    taskId: resticBrowser.taskId,
-    snapshot: resticBrowser.snapshot,
-    path: relativePath
+    taskId: request.taskId,
+    snapshot: request.snapshot,
+    path: request.path
   });
   const body = await get(`/api/restic/browse?${query}`);
+  if (!isCurrentResticFolderRequest(resticBrowser, request)) return;
   resticBrowser.path = body.path || '';
   resticBrowser.parent = body.parent;
   resticBrowser.entries = body.entries || [];
@@ -969,33 +1034,65 @@ function resticSelectionBody(relativePath) {
 
 async function runResticAction(endpoint, message) {
   if (!resticBrowser.taskId) return show('请先创建 Restic 任务');
-  await post(endpoint, { taskId: resticBrowser.taskId });
-  await refreshStatus();
-  show(message);
+  try {
+    await post(endpoint, { taskId: resticBrowser.taskId });
+    await refreshStatus();
+    show(message);
+  } catch (error) {
+    await refreshStatus().catch(() => {});
+    show(error.message);
+  }
 }
 
 function renderResticJob() {
   const job = currentStatus?.restic || { active: false };
-  const taskIndex = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId)?.index;
+  const taskStatus = (currentStatus?.resticTasks || []).find((item) => item.taskId === resticBrowser.taskId);
+  const taskIndex = taskStatus?.index;
+  const passwordConfigured = taskStatus?.passwordConfigured === true;
   resticControls.indexStatus.textContent = `目录索引：${resticIndexStatusText(taskIndex)}`;
   resticControls.stop.disabled = !job.active;
-  if (!job.taskId) {
-    resticControls.job.textContent = '未运行';
+  for (const control of [resticControls.backup, resticControls.check, resticControls.prune, resticControls.rebuildIndex]) {
+    control.disabled = !passwordConfigured || job.active;
+  }
+  resticControls.exportRecovery.disabled = !passwordConfigured;
+  if (resticBrowser.taskId && !passwordConfigured) {
+    resticControls.job.textContent = '请先在设置中为当前任务保存 Restic 密码';
     resticControls.jobDetails.hidden = true;
     resticControls.jobDetails.innerHTML = '';
     return;
   }
-  if (job.active) {
+  if (!job.taskId || job.taskId !== resticBrowser.taskId) {
+    resticControls.job.textContent = job.active
+      ? `当前所选任务未运行；${job.taskName} 正在${resticActionText(job.action)}`
+      : '当前所选任务未运行';
+    resticControls.jobDetails.hidden = true;
+    resticControls.jobDetails.innerHTML = '';
+    return;
+  }
+  if (job.active && job.stopping) {
+    resticControls.job.textContent = `${job.taskName}：正在停止`;
+  } else if (job.active) {
     const progress = job.action === 'backup'
       ? ` · ${job.percent || 0}% · ${formatNumber(job.filesDone || 0)}/${formatNumber(job.totalFiles || 0)} 文件 · ${formatBytes(job.bytesDone || 0)}/${formatBytes(job.totalBytes || 0)}`
       : '';
     resticControls.job.textContent = `${job.taskName}：${resticActionText(job.action)}${progress}`;
+  } else if (job.stopped) {
+    resticControls.job.textContent = `${job.taskName}：${job.result?.message || '已由用户停止，本次未创建快照'}`;
   } else if (job.error) {
     resticControls.job.textContent = `${job.taskName}：失败 — ${job.error}`;
   } else {
     resticControls.job.textContent = `${job.taskName}：${job.result?.message || '操作完成'}`;
   }
   renderResticJobDetails(job);
+}
+
+function renderResticTaskPlaceholder(message) {
+  resticControls.snapshot.innerHTML = '<option value="">正在加载</option>';
+  resticControls.snapshot.value = '';
+  resticControls.path.textContent = '/';
+  resticControls.up.disabled = true;
+  document.querySelector('#resticDownloadFolder').disabled = true;
+  resticControls.rows.innerHTML = `<tr><td colspan="5" class="empty">${escapeHtml(message)}</td></tr>`;
 }
 
 function renderResticJobDetails(job) {
@@ -1041,6 +1138,7 @@ function resticPhaseText(phase, active) {
     retention: '应用保留策略',
     indexing: '生成目录索引',
     'publishing-index': '上传加密索引',
+    stopped: '已由用户停止',
     complete: '完成'
   }[phase] || (active ? '处理中' : '已结束');
 }
