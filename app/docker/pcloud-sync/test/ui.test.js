@@ -86,6 +86,36 @@ test('web UI exposes Restic snapshot browse, download, zip, and restore actions'
   assert.match(script, /预计剩余/);
   assert.match(script, /最后活动/);
   assert.match(script, /recentErrors/);
+  assert.match(script, /job\.stopped/);
+  assert.match(script, /已由用户停止/);
+  assert.match(script, /本次未创建快照/);
+});
+
+test('saving a Restic password captures it before the task editor is re-rendered', async () => {
+  const [script, styles] = await Promise.all([
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
+  ]);
+  const handler = script.indexOf("if (action === 'set-restic-password')");
+  const capture = script.indexOf("const password = editor.querySelector('[name=\"resticPassword\"]').value", handler);
+  const save = script.indexOf('await saveConfig()', handler);
+
+  assert.ok(handler >= 0);
+  assert.ok(capture > handler);
+  assert.ok(save > capture);
+  assert.doesNotMatch(script, /await saveConfig\(\);\s+const refreshed[^}]+const password = refreshed\.querySelector/);
+  assert.match(script, /保存 Restic 密码失败/);
+  assert.match(script, /请先在设置中为当前任务保存 Restic 密码/);
+  assert.match(script, /passwordConfigured/);
+  assert.match(script, /data-restic-password-status/);
+  assert.match(script, /aria-live="polite"/);
+  assert.match(script, /正在保存密码/);
+  assert.match(script, /密码已保存/);
+  assert.match(script, /尚未保存密码/);
+  assert.match(script, /setResticPasswordStatus/);
+  assert.match(styles, /\.restic-password-status/);
+  assert.match(styles, /data-status="saved"/);
+  assert.match(styles, /data-status="error"/);
 });
 
 test('settings exposes pCloud upload and download speed test controls', async () => {

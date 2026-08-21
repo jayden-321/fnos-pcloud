@@ -8,6 +8,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip, createGzip } from 'node:zlib';
 import { PCloudClient } from '../pcloud/client.js';
+import { resticTaskKey } from './taskKey.js';
 
 const scrypt = promisify(scryptCallback);
 const FORMAT_VERSION = 1;
@@ -231,11 +232,11 @@ export class ResticIndexCatalog {
 
   remoteBase(task) {
     const parent = path.posix.dirname(task.remotePath);
-    return path.posix.join(parent, '.pcloud-nas-sync-index', safeId(task.id));
+    return path.posix.join(parent, '.pcloud-nas-sync-index', resticTaskKey(task.id));
   }
 
   async ensureTempDir(taskId) {
-    const directory = path.join(this.dataDir, 'restic', 'index-temp', safeId(taskId));
+    const directory = path.join(this.dataDir, 'restic', 'index-temp', resticTaskKey(taskId));
     await mkdir(directory, { recursive: true, mode: 0o700 });
     return directory;
   }
@@ -254,7 +255,7 @@ export class ResticIndexCatalog {
   }
 
   passwordPath(taskId) {
-    return path.join(this.dataDir, 'restic', 'secrets', `${safeId(taskId)}.password`);
+    return path.join(this.dataDir, 'restic', 'secrets', `${resticTaskKey(taskId)}.password`);
   }
 }
 
@@ -316,8 +317,4 @@ async function sha256File(filePath) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
   return hash.digest('hex');
-}
-
-function safeId(value) {
-  return String(value || 'task').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'task';
 }

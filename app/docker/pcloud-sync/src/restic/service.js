@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 import { normalizeConfig } from '../config/config.js';
 import { writeStoredZip } from '../archive/zip.js';
+import { resticTaskKey } from './taskKey.js';
 
 export class ResticService {
   constructor({
@@ -102,6 +103,7 @@ export class ResticService {
 
   async startBackup(taskId) {
     const task = await this.task(taskId);
+    await this.requirePassword(task.id);
     return this.startJob('backup', task, async (update) => {
       const config = await this.config();
       const progressState = { samples: [], recentFiles: [], recentErrors: [] };
@@ -152,6 +154,7 @@ export class ResticService {
 
   async startIndexRebuild(taskId, snapshotId = '') {
     const task = await this.task(taskId);
+    await this.requirePassword(task.id);
     return this.startJob('index', task, async (update) => {
       const config = await this.config();
       let snapshot = snapshotId ? cleanSnapshotId(snapshotId) : '';
@@ -168,6 +171,7 @@ export class ResticService {
 
   async startCheck(taskId) {
     const task = await this.task(taskId);
+    await this.requirePassword(task.id);
     return this.startJob('check', task, async () => {
       const config = await this.config();
       await this.restic(task, config, ['check']);
@@ -177,6 +181,7 @@ export class ResticService {
 
   async startPrune(taskId) {
     const task = await this.task(taskId);
+    await this.requirePassword(task.id);
     return this.startJob('prune', task, async () => {
       const config = await this.config();
       await this.restic(task, config, ['prune']);
@@ -340,10 +345,15 @@ export class ResticService {
   }
 
   async ensureRepository(task, config) {
-    const probe = await this.restic(task, config, ['snapshots', '--json'], { allowExitCodes: [0, 10] });
-    if (probe.code === 10) {
+    const probe = await this.restic(task, config, ['snapshots', '--json'], { allowExitCodes: [0, 1, 10] });
+    if (probe.code === 0) return;
+    if (probe.code === 10 || isMissingRepositoryProbe(probe)) {
       await this.restic(task, config, ['init', '--repository-version', '2']);
+      return;
     }
+    const error = new Error(cleanCommandError(probe.stderr || probe.stdout || `restic snapshots exited with code ${probe.code}`));
+    error.exitCode = probe.code;
+    throw error;
   }
 
   async forget(task, config) {
@@ -362,7 +372,7 @@ export class ResticService {
       ...process.env,
       RESTIC_REPOSITORY: this.repositoryUrl(task),
       RESTIC_PASSWORD_FILE: this.passwordPath(task.id),
-      RESTIC_CACHE_DIR: path.join(this.dataDir, 'restic', 'cache', safeId(task.id)),
+      RESTIC_CACHE_DIR: path.join(this.dataDir, 'restic', 'cache', resticTaskKey(task.id)),
       RESTIC_COMPRESSION: task.restic?.compression || 'auto'
     };
     const commandArgs = ['--retry-lock', '2m', ...args];
@@ -402,8 +412,32 @@ export class ResticService {
     };
     const update = (patch) => Object.assign(this.job, patch);
     this.job.promise = operation(update)
-      .then((result) => update({ active: false, finishedAt: new Date().toISOString(), result }))
-      .catch((error) => update({ active: false, finishedAt: new Date().toISOString(), error: error.message }))
+      .then((result) => update({
+        active: false,
+        stopping: false,
+        stopped: false,
+        finishedAt: new Date().toISOString(),
+        error: '',
+        result
+      }))
+      .catch((error) => {
+        const stopped = this.job.stopping && isCancellationError(error);
+        update(stopped ? {
+          active: false,
+          stopping: false,
+          stopped: true,
+          phase: 'stopped',
+          finishedAt: new Date().toISOString(),
+          error: '',
+          result: { message: stoppedJobMessage(action) }
+        } : {
+          active: false,
+          stopping: false,
+          stopped: false,
+          finishedAt: new Date().toISOString(),
+          error: cleanCommandError(error.message)
+        });
+      })
       .finally(() => { delete this.job.child; delete this.job.promise; });
     return this.getStatus();
   }
@@ -434,8 +468,14 @@ export class ResticService {
     }
   }
 
+  async requirePassword(taskId) {
+    if (!await this.passwordConfigured(taskId)) {
+      throw httpError('请先为该任务设置 Restic 密码', 400);
+    }
+  }
+
   passwordPath(taskId) {
-    return path.join(this.dataDir, 'restic', 'secrets', `${safeId(taskId)}.password`);
+    return path.join(this.dataDir, 'restic', 'secrets', `${resticTaskKey(taskId)}.password`);
   }
 
   assertSourcePath(sourcePath) {
@@ -531,8 +571,9 @@ export async function defaultRunCommand(command, args, options = {}) {
       const stderrText = stderr.text();
       const allowed = options.allowExitCodes || [0];
       if (allowed.includes(code)) return resolve({ code, stdout: stdoutText, stderr: stderrText, signal });
-      const error = new Error((stderrText || stdoutText || `${command} exited with code ${code}`).trim());
+      const error = new Error(cleanCommandError(stderrText || stdoutText || `${command} exited with code ${code}`));
       error.exitCode = code;
+      error.signal = signal || '';
       reject(error);
     });
   });
@@ -606,6 +647,40 @@ function timestampForPath() {
 
 function parseJson(line) {
   try { return JSON.parse(String(line || '')); } catch { return null; }
+}
+
+function cleanCommandError(value) {
+  const text = stripTerminalControls(value).replaceAll('\r', '').trim();
+  if (!text) return '命令执行失败';
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const structured = parseJson(lines[index]);
+    const message = typeof structured?.message === 'string'
+      ? structured.message
+      : typeof structured?.error?.message === 'string' ? structured.error.message : '';
+    if (message) return stripTerminalControls(message).trim();
+  }
+  return lines.join('\n');
+}
+
+function isMissingRepositoryProbe(probe) {
+  const detail = `${probe?.stderr || ''}\n${probe?.stdout || ''}`;
+  return /repository does not exist|unable to open config file:[\s\S]*does not exist[\s\S]*is there a repository/i.test(detail);
+}
+
+function stripTerminalControls(value) {
+  return String(value || '')
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+}
+
+function isCancellationError(error) {
+  if (String(error?.signal || '').toUpperCase() === 'SIGTERM') return true;
+  return /context canceled|operation cancell?ed|signal terminated|terminated by signal|sigterm/i.test(String(error?.message || ''));
+}
+
+function stoppedJobMessage(action) {
+  return action === 'backup' ? '已由用户停止，本次未创建快照' : '已由用户停止';
 }
 
 function backupProgressPatch(message, state, sourcePath) {
