@@ -168,15 +168,17 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Current Limitations
 
-- v0.5.14 is a backup application, not a two-way sync client.
+- v0.5.16 is a backup application, not a two-way sync client.
 - Legacy upload tasks do not propagate local deletions to pCloud.
-- v0.5.14 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
+- v0.5.16 uses a fresh SQLite state database and does not migrate legacy `state.json` task or file caches.
 - First scans, forced remote comparisons, and remote path changes can still take time on very large folders because they reconcile the local tree with the pCloud destination. Repeated scans use pCloud `diff` where a task cursor is available and cached file state otherwise.
 - Scheduled runs rely on recursive filesystem watcher support inside the container. If the watcher is unavailable for a mounted folder, that task falls back to a full scan and writes a `watch_failed` log event.
 - Real installation behavior should still be validated on an fnOS NAS through the app center.
 
 ## Changelog
 
+- v0.5.16: Recovers a completed backup when retention encounters stale Restic locks by running the standard stale-only unlock and retrying retention once; live locks are never force-removed.
+- v0.5.15: Allows a task with an existing local encrypted index to browse cached snapshots and folders while another Restic task is backing up; snapshot-load failures now replace the loading placeholder with an explicit busy or read error.
 - v0.5.14: Shows persistent per-task Restic password states for checking, saving, saved, missing, and failed saves; recognizes Restic 0.18's exit-code-1 missing-repository response and initializes the first repository without treating unrelated backend failures as missing repositories.
 - v0.5.13: Fixes multi-task Restic detail switching and stale asynchronous responses; captures passwords before task-form redraw; reports password-save errors; refuses to mark passwordless jobs active; and shares a collision-safe storage key across Restic backup and encrypted cloud-index handling for Chinese task IDs.
 - v0.5.12: Treats manually stopped Restic operations as stopped instead of failed, resets the stopping state after exit, strips terminal control sequences, and unwraps structured command errors before displaying them.

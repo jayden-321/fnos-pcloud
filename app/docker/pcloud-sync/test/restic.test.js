@@ -120,6 +120,64 @@ test('ResticService initializes a repository, reports backup progress, and appli
   assert.ok(calls.some(([, args]) => args.includes('forget') && args.includes('--keep-monthly')));
 });
 
+test('ResticService removes stale locks and retries retention once after a completed backup', async () => {
+  const calls = [];
+  let forgetAttempts = 0;
+  const { service } = await fixture(async (command, args, options) => {
+    calls.push([command, args]);
+    if (args.includes('snapshots')) return { code: 0, stdout: '[]', stderr: '' };
+    if (args.includes('backup')) {
+      options.onStdoutLine?.(JSON.stringify({ message_type: 'summary', snapshot_id: 'abcdef123456' }));
+    }
+    if (args.includes('forget') && forgetAttempts++ === 0) {
+      const error = new Error([
+        'unable to create lock in backend: repository is already locked by PID 84 on abcdef123456 by root',
+        'the `unlock` command can be used to remove stale locks'
+      ].join('\n'));
+      error.exitCode = 1;
+      throw error;
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  await service.setPassword('honvin', 'a-strong-test-password');
+
+  await service.startBackup('honvin');
+  const finished = await service.waitForIdle();
+
+  const maintenance = calls
+    .map(([, args]) => args)
+    .filter((args) => args.includes('forget') || args.includes('unlock'))
+    .map((args) => args.includes('unlock') ? 'unlock' : 'forget');
+  const unlockArgs = calls.find(([, args]) => args.includes('unlock'))?.[1] || [];
+  assert.deepEqual(maintenance, ['forget', 'unlock', 'forget']);
+  assert.equal(unlockArgs.includes('--remove-all'), false);
+  assert.equal(finished.error, '');
+  assert.equal(finished.staleLockRecovery, 'recovered');
+});
+
+test('ResticService does not loop or force-remove a lock that remains active', async () => {
+  const calls = [];
+  const { service } = await fixture(async (command, args) => {
+    calls.push([command, args]);
+    if (args.includes('snapshots')) return { code: 0, stdout: '[]', stderr: '' };
+    if (args.includes('forget')) {
+      throw new Error('unable to create lock in backend: repository is already locked by PID 91 on another-host');
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  await service.setPassword('honvin', 'a-strong-test-password');
+
+  await service.startBackup('honvin');
+  const finished = await service.waitForIdle();
+
+  const forgetCalls = calls.filter(([, args]) => args.includes('forget'));
+  const unlockCalls = calls.filter(([, args]) => args.includes('unlock'));
+  assert.equal(forgetCalls.length, 2);
+  assert.equal(unlockCalls.length, 1);
+  assert.equal(unlockCalls[0][1].includes('--remove-all'), false);
+  assert.match(finished.error, /repository is already locked by PID 91/);
+});
+
 test('ResticService initializes a missing Restic 0.18 repository when the probe exits with code 1', async () => {
   const calls = [];
   let firstProbe = true;
@@ -314,6 +372,56 @@ test('ResticService serves cached snapshots and folders without invoking Restic'
   assert.equal(commands, 0);
   assert.equal(snapshots[0].id, snapshot.id);
   assert.deepEqual(root.entries.map((entry) => [entry.name, entry.type]), [['公司', 'folder']]);
+});
+
+test('ResticService serves one task cached index while another task is backing up', async () => {
+  let backupStartedResolve;
+  let finishBackupResolve;
+  const backupStarted = new Promise((resolve) => { backupStartedResolve = resolve; });
+  const finishBackup = new Promise((resolve) => { finishBackupResolve = resolve; });
+  const calls = [];
+  const { service, store, sourceRoot } = await fixture(async (_command, args, options) => {
+    calls.push(args);
+    if (args.includes('snapshots')) return { code: 0, stdout: '[]', stderr: '' };
+    if (args.includes('backup')) {
+      options.onChild?.({ kill() {} });
+      backupStartedResolve();
+      return finishBackup;
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  });
+  const archiveRoot = path.join(sourceRoot, 'archive');
+  await mkdir(archiveRoot, { recursive: true });
+  const config = await store.loadConfig();
+  config.tasks.push({
+    id: 'archive', name: 'archive', mode: 'restic', enabled: true,
+    localPath: archiveRoot, remotePath: '/restic-backups/archive',
+    schedule: { type: 'manual' },
+    restic: { keepDaily: 7, keepWeekly: 4, keepMonthly: 12, compression: 'auto' }
+  });
+  await store.saveConfig(config);
+  await service.setPassword('archive', 'another-strong-password');
+  const snapshot = { id: 'abcdef123456', shortId: 'abcdef12', time: '2026-07-19T00:00:00Z', paths: [] };
+  await store.beginResticIndexBuild('honvin', snapshot);
+  await store.appendResticIndexEntries('honvin', snapshot.id, [
+    { path: '公司', parent: '', name: '公司', type: 'folder', size: 0, mtime: '' }
+  ]);
+  await store.finishResticIndexBuild('honvin', snapshot.id);
+
+  await service.startBackup('archive');
+  await backupStarted;
+  const commandCountBeforeBrowse = calls.length;
+  const snapshots = await service.snapshots('honvin');
+  const root = await service.browse('honvin', snapshot.id, '');
+
+  assert.equal(service.getStatus().taskId, 'archive');
+  assert.equal(service.getStatus().active, true);
+  assert.equal(calls.length, commandCountBeforeBrowse);
+  assert.equal(snapshots[0].id, snapshot.id);
+  assert.deepEqual(root.entries.map((entry) => [entry.name, entry.type]), [['公司', 'folder']]);
+
+  finishBackupResolve({ code: 0, stdout: '', stderr: '' });
+  await service.waitForIdle();
 });
 
 test('ResticService restores a selected file into an isolated download directory', async () => {

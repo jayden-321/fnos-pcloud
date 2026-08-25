@@ -137,7 +137,7 @@ export class ResticService {
         }
       });
       update({ phase: 'retention' });
-      await this.forget(task, config);
+      await this.forget(task, config, update);
       let index = null;
       if (snapshotId && this.indexCatalog) {
         try {
@@ -197,18 +197,17 @@ export class ResticService {
   }
 
   async snapshots(taskId) {
-    this.assertReadable();
     const task = await this.task(taskId);
     const cached = this.store.listResticSnapshotIndexes ? await this.store.listResticSnapshotIndexes(task.id) : [];
     if (cached.length) {
-      this.reconcileOne(task).catch((error) => this.recordIndexError(task.id, error));
+      if (!this.job?.active) this.reconcileOne(task).catch((error) => this.recordIndexError(task.id, error));
       return cached.map(normalizeSnapshot);
     }
+    this.assertReadable(task.id);
     return this.liveSnapshots(task, await this.config());
   }
 
   async browse(taskId, snapshotId, relativePath = '') {
-    this.assertReadable();
     const task = await this.task(taskId);
     const snapshot = cleanSnapshotId(snapshotId);
     const relative = cleanRelativePath(relativePath);
@@ -222,6 +221,7 @@ export class ResticService {
         entries: entries.map(({ parent: _parent, ...entry }) => entry)
       };
     }
+    this.assertReadable(task.id);
     const snapshotPath = snapshotPathFor(task, relative);
     const result = await this.restic(task, await this.config(), ['ls', '--json', snapshot, snapshotPath]);
     const entries = result.stdout.split(/\r?\n/)
@@ -244,8 +244,8 @@ export class ResticService {
   }
 
   async prepareDownload(taskId, snapshotId, relativePath, { zip = false } = {}) {
-    this.assertReadable();
     const task = await this.task(taskId);
+    this.assertReadable(task.id);
     const snapshot = cleanSnapshotId(snapshotId);
     const relative = cleanRelativePath(relativePath);
     if (!relative) throw httpError('请选择要下载的文件或文件夹', 400);
@@ -356,13 +356,30 @@ export class ResticService {
     throw error;
   }
 
-  async forget(task, config) {
+  async forget(task, config, update = () => {}) {
     const policy = task.restic || {};
     const args = ['forget', '--tag', `task:${task.id}`];
     if (policy.keepDaily > 0) args.push('--keep-daily', String(policy.keepDaily));
     if (policy.keepWeekly > 0) args.push('--keep-weekly', String(policy.keepWeekly));
     if (policy.keepMonthly > 0) args.push('--keep-monthly', String(policy.keepMonthly));
-    if (args.length > 3) await this.restic(task, config, args);
+    if (args.length <= 3) return;
+    try {
+      await this.restic(task, config, args);
+    } catch (error) {
+      if (!isRepositoryLockedError(error)) throw error;
+      update({ phase: 'unlocking-stale-locks', staleLockRecovery: 'running' });
+      try {
+        // Standard `restic unlock` removes only locks Restic identifies as stale.
+        // Never use --remove-all here: a live external writer must remain protected.
+        await this.restic(task, config, ['unlock']);
+        update({ phase: 'retention', staleLockRecovery: 'retrying' });
+        await this.restic(task, config, args);
+        update({ staleLockRecovery: 'recovered' });
+      } catch (retryError) {
+        update({ staleLockRecovery: 'failed' });
+        throw retryError;
+      }
+    }
   }
 
   async restic(task, config, args, options = {}) {
@@ -485,8 +502,12 @@ export class ResticService {
     }
   }
 
-  assertReadable() {
-    if (this.job?.active) throw httpError('Restic 正在执行写入操作，请稍后再浏览', 409);
+  assertReadable(taskId = '') {
+    if (!this.job?.active) return;
+    const message = taskId && this.job.taskId && taskId !== this.job.taskId
+      ? '另一个 Restic 任务正在运行，当前任务没有可用的本地索引，请稍后再浏览'
+      : '当前 Restic 任务正在执行写入操作，请稍后再浏览';
+    throw httpError(message, 409);
   }
 
   async ensureDirectories() {
@@ -666,6 +687,12 @@ function cleanCommandError(value) {
 function isMissingRepositoryProbe(probe) {
   const detail = `${probe?.stderr || ''}\n${probe?.stdout || ''}`;
   return /repository does not exist|unable to open config file:[\s\S]*does not exist[\s\S]*is there a repository/i.test(detail);
+}
+
+function isRepositoryLockedError(error) {
+  const detail = String(error?.message || '');
+  return /unable to create lock/i.test(detail)
+    && /repository is already locked|already locked by PID/i.test(detail);
 }
 
 function stripTerminalControls(value) {

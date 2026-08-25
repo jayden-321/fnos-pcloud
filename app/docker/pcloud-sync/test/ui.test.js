@@ -89,6 +89,10 @@ test('web UI exposes Restic snapshot browse, download, zip, and restore actions'
   assert.match(script, /job\.stopped/);
   assert.match(script, /已由用户停止/);
   assert.match(script, /本次未创建快照/);
+  assert.match(script, /renderResticSnapshotError/);
+  assert.match(script, /快照读取失败/);
+  assert.match(script, /无法读取快照/);
+  assert.match(script, /清理陈旧仓库锁/);
 });
 
 test('saving a Restic password captures it before the task editor is re-rendered', async () => {

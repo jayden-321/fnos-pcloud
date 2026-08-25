@@ -976,7 +976,13 @@ async function loadResticSnapshots() {
     return;
   }
   const request = beginResticSnapshotRequest(resticBrowser);
-  const body = await get(`/api/restic/snapshots?taskId=${encodeURIComponent(request.taskId)}`);
+  let body;
+  try {
+    body = await get(`/api/restic/snapshots?taskId=${encodeURIComponent(request.taskId)}`);
+  } catch (error) {
+    if (isCurrentResticSnapshotRequest(resticBrowser, request)) renderResticSnapshotError(error.message);
+    return;
+  }
   if (!isCurrentResticSnapshotRequest(resticBrowser, request)) return;
   resticBrowser.snapshots = body.snapshots || [];
   const index = (currentStatus?.resticTasks || []).find((item) => item.taskId === request.taskId)?.index;
@@ -991,6 +997,20 @@ async function loadResticSnapshots() {
   resticBrowser.path = '';
   if (resticBrowser.snapshot) await loadResticFolder('');
   else resticControls.rows.innerHTML = '<tr><td colspan="5" class="empty">暂无快照，请先运行备份</td></tr>';
+}
+
+function renderResticSnapshotError(message) {
+  resticBrowser.snapshot = '';
+  resticBrowser.path = '';
+  resticBrowser.parent = null;
+  resticBrowser.entries = [];
+  resticBrowser.snapshots = [];
+  resticControls.snapshot.innerHTML = '<option value="">无法读取快照</option>';
+  resticControls.snapshot.value = '';
+  resticControls.path.textContent = '/';
+  resticControls.up.disabled = true;
+  document.querySelector('#resticDownloadFolder').disabled = true;
+  resticControls.rows.innerHTML = `<tr><td colspan="5" class="empty">快照读取失败：${escapeHtml(message)}</td></tr>`;
 }
 
 async function loadResticFolder(relativePath = '') {
@@ -1136,6 +1156,7 @@ function resticPhaseText(phase, active) {
     'checking-repository': '检查仓库',
     'backing-up': '扫描并上传',
     retention: '应用保留策略',
+    'unlocking-stale-locks': '清理陈旧仓库锁',
     indexing: '生成目录索引',
     'publishing-index': '上传加密索引',
     stopped: '已由用户停止',
