@@ -19,10 +19,18 @@ staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/pcloud-fpk.XXXXXX")
 trap 'rm -r "$staging_dir"' EXIT HUP INT TERM
 mkdir -p "$staging_dir/package/wizard" "$project_dir/outputs"
 
-COPYFILE_DISABLE=1 tar -czf "$staging_dir/package/app.tgz" -C "$project_dir/app" docker ui
+# fnOS install hooks must not inherit the build machine's macOS UID/group.
+package_tar() {
+  case "$(tar --version)" in
+    *bsdtar*) COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --uname root --gname root "$@" ;;
+    *) COPYFILE_DISABLE=1 tar --owner=0 --group=0 "$@" ;;
+  esac
+}
+
+package_tar -czf "$staging_dir/package/app.tgz" -C "$project_dir/app" docker ui
 cp "$project_dir/manifest" "$project_dir/LICENSE" "$project_dir/ICON.PNG" "$project_dir/ICON_256.PNG" "$staging_dir/package/"
 cp -R "$project_dir/cmd" "$project_dir/config" "$staging_dir/package/"
 
 output="$project_dir/outputs/pcloud-nas-sync-$version.fpk"
-COPYFILE_DISABLE=1 tar -czf "$output" -C "$staging_dir/package" app.tgz LICENSE cmd config ICON.PNG ICON_256.PNG manifest wizard
+package_tar -czf "$output" -C "$staging_dir/package" app.tgz LICENSE cmd config ICON.PNG ICON_256.PNG manifest wizard
 echo "$output"

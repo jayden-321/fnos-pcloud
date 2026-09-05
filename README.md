@@ -177,6 +177,8 @@ The fnOS Docker app template expects the root directory to include `manifest`, `
 
 ## Changelog
 
+- v0.5.17: Backup preparation no longer touches the restore mount. Restore/download requests reject missing or deleted mounts instead of hanging in native recursive mkdir. Directory creation uses bounded parent checks and one mkdir attempt per level. Repository probes and initialization have a five-minute deadline; cancellation also works before child startup and escalates unresponsive children after ten seconds. Long backup commands have no new wall-clock limit.
+
 - v0.5.16: Recovers a completed backup when retention encounters stale Restic locks by running the standard stale-only unlock and retrying retention once; live locks are never force-removed.
 - v0.5.15: Allows a task with an existing local encrypted index to browse cached snapshots and folders while another Restic task is backing up; snapshot-load failures now replace the loading placeholder with an explicit busy or read error.
 - v0.5.14: Shows persistent per-task Restic password states for checking, saving, saved, missing, and failed saves; recognizes Restic 0.18's exit-code-1 missing-repository response and initializes the first repository without treating unrelated backend failures as missing repositories.

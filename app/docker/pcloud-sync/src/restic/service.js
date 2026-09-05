@@ -1,13 +1,15 @@
 import { createReadStream } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 import { normalizeConfig } from '../config/config.js';
 import { writeStoredZip } from '../archive/zip.js';
 import { resticTaskKey } from './taskKey.js';
+import { ensureDirectory, requireDirectory } from './directories.js';
 
 export class ResticService {
   constructor({
@@ -19,7 +21,8 @@ export class ResticService {
     resticBinary = 'restic',
     backend = null,
     indexCatalog = null,
-    zipBinary = 'zip'
+    zipBinary = 'zip',
+    repositoryTimeoutMs = 300_000
   } = {}) {
     this.store = store;
     this.dataDir = dataDir;
@@ -30,6 +33,8 @@ export class ResticService {
     this.backend = backend;
     this.indexCatalog = indexCatalog;
     this.zipBinary = zipBinary;
+    this.repositoryTimeoutMs = repositoryTimeoutMs;
+    this.jobContext = new AsyncLocalStorage();
     this.timer = null;
     this.job = null;
     this.scheduleSlots = new Map();
@@ -52,12 +57,12 @@ export class ResticService {
     this.timer = null;
     if (this.reconcileTimer) clearTimeout(this.reconcileTimer);
     this.reconcileTimer = null;
-    if (this.job?.child?.kill) this.job.child.kill('SIGTERM');
+    this.stopJob();
   }
 
   getStatus() {
     if (!this.job) return { active: false };
-    const { child: _child, promise: _promise, ...status } = this.job;
+    const { child: _child, promise: _promise, controller: _controller, ...status } = this.job;
     return structuredClone(status);
   }
 
@@ -75,7 +80,7 @@ export class ResticService {
     const value = String(password || '');
     if (value.length < 12) throw httpError('Restic 密码至少需要 12 个字符', 400);
     const passwordPath = this.passwordPath(task.id);
-    await mkdir(path.dirname(passwordPath), { recursive: true, mode: 0o700 });
+    await ensureDirectory(path.dirname(passwordPath), { mode: 0o700 });
     await writeFile(passwordPath, `${value}\n`, { mode: 0o600 });
     await chmod(passwordPath, 0o600);
     return { taskId: task.id, passwordConfigured: true };
@@ -192,6 +197,7 @@ export class ResticService {
   stopJob() {
     if (!this.job?.active) return { stopping: false };
     this.job.stopping = true;
+    this.job.controller.abort(new Error('Operation cancelled'));
     this.job.child?.kill?.('SIGTERM');
     return { stopping: true };
   }
@@ -251,7 +257,8 @@ export class ResticService {
     if (!relative) throw httpError('请选择要下载的文件或文件夹', 400);
     const tempDir = path.join(this.restoreRoot, '.downloads', randomUUID());
     const restoredRoot = path.join(tempDir, 'restored');
-    await mkdir(restoredRoot, { recursive: true });
+    await this.requireRestoreRoot();
+    await ensureDirectory(restoredRoot);
     try {
       const config = await this.config();
       const sourcePath = snapshotPathFor(task, relative);
@@ -275,7 +282,8 @@ export class ResticService {
     const snapshot = cleanSnapshotId(snapshotId);
     const relative = cleanRelativePath(relativePath);
     const destination = path.join(this.restoreRoot, `${safeId(task.id)}-${timestampForPath()}`);
-    await mkdir(destination, { recursive: true });
+    await this.requireRestoreRoot();
+    await ensureDirectory(destination);
     const args = ['restore', snapshot, '--target', destination];
     if (relative) args.push('--include', snapshotPathFor(task, relative));
     await this.restic(task, await this.config(), args);
@@ -345,10 +353,12 @@ export class ResticService {
   }
 
   async ensureRepository(task, config) {
-    const probe = await this.restic(task, config, ['snapshots', '--json'], { allowExitCodes: [0, 1, 10] });
+    const probe = await this.restic(task, config, ['snapshots', '--json'], {
+      allowExitCodes: [0, 1, 10], timeoutMs: this.repositoryTimeoutMs
+    });
     if (probe.code === 0) return;
     if (probe.code === 10 || isMissingRepositoryProbe(probe)) {
-      await this.restic(task, config, ['init', '--repository-version', '2']);
+      await this.restic(task, config, ['init', '--repository-version', '2'], { timeoutMs: this.repositoryTimeoutMs });
       return;
     }
     const error = new Error(cleanCommandError(probe.stderr || probe.stdout || `restic snapshots exited with code ${probe.code}`));
@@ -383,8 +393,11 @@ export class ResticService {
   }
 
   async restic(task, config, args, options = {}) {
+    const job = this.jobContext.getStore();
+    job?.controller.signal.throwIfAborted();
     await this.ensureDirectories();
     if (!await this.passwordConfigured(task.id)) throw httpError('请先为该任务设置 Restic 密码', 400);
+    job?.controller.signal.throwIfAborted();
     const env = {
       ...process.env,
       RESTIC_REPOSITORY: this.repositoryUrl(task),
@@ -398,11 +411,15 @@ export class ResticService {
       maxOutputBytes: options.maxOutputBytes || 64 * 1024 * 1024,
       onStdoutLine: options.onStdoutLine,
       onStderrLine: options.onStderrLine,
+      signal: job?.controller.signal,
+      timeoutMs: options.timeoutMs,
       onChild: (child) => {
-        if (this.job?.active) this.job.child = child;
+        if (job?.active) job.child = child;
       },
       allowExitCodes: options.allowExitCodes || [0]
     });
+    if (job) delete job.child;
+    job?.controller.signal.throwIfAborted();
     return result;
   }
 
@@ -427,8 +444,10 @@ export class ResticService {
       totalBytes: 0,
       error: ''
     };
-    const update = (patch) => Object.assign(this.job, patch);
-    this.job.promise = operation(update)
+    const job = this.job;
+    job.controller = new AbortController();
+    const update = (patch) => Object.assign(job, patch);
+    job.promise = this.jobContext.run(job, () => Promise.resolve().then(() => operation(update)))
       .then((result) => update({
         active: false,
         stopping: false,
@@ -438,7 +457,7 @@ export class ResticService {
         result
       }))
       .catch((error) => {
-        const stopped = this.job.stopping && isCancellationError(error);
+        const stopped = job.stopping && isCancellationError(error);
         update(stopped ? {
           active: false,
           stopping: false,
@@ -451,11 +470,12 @@ export class ResticService {
           active: false,
           stopping: false,
           stopped: false,
+          phase: 'failed',
           finishedAt: new Date().toISOString(),
           error: cleanCommandError(error.message)
         });
       })
-      .finally(() => { delete this.job.child; delete this.job.promise; });
+      .finally(() => { delete job.child; delete job.promise; });
     return this.getStatus();
   }
 
@@ -512,10 +532,17 @@ export class ResticService {
 
   async ensureDirectories() {
     await Promise.all([
-      mkdir(path.join(this.dataDir, 'restic', 'secrets'), { recursive: true, mode: 0o700 }),
-      mkdir(path.join(this.dataDir, 'restic', 'cache'), { recursive: true }),
-      mkdir(path.join(this.restoreRoot, '.downloads'), { recursive: true })
+      ensureDirectory(path.join(this.dataDir, 'restic', 'secrets'), { mode: 0o700 }),
+      ensureDirectory(path.join(this.dataDir, 'restic', 'cache'))
     ]);
+  }
+
+  async requireRestoreRoot() {
+    try {
+      await requireDirectory(this.restoreRoot);
+    } catch (error) {
+      throw httpError(`恢复目录不可用：${this.restoreRoot}。请检查宿主机目录并重新挂载容器后重试。`, 503);
+    }
   }
 
   downloadResult(filePath, tempDir, filename, contentType) {
@@ -562,13 +589,38 @@ export function fileStreamWithCleanup(filePath, tempDir) {
 }
 
 export async function defaultRunCommand(command, args, options = {}) {
+  options.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env || process.env,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    options.onChild?.(child);
+    let failure = null;
+    let timeout;
+    let escalation;
+    let finished = false;
+    const terminate = (error) => {
+      if (failure || finished) return;
+      failure = error;
+      child.kill('SIGTERM');
+      escalation = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 10_000);
+    };
+    const abort = () => terminate(options.signal.reason || new Error('Operation cancelled'));
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        const error = new Error(`Restic 仓库操作超过 ${Math.round(options.timeoutMs / 1000)} 秒，已终止；请检查网络和仓库后重试。`);
+        error.code = 'ETIMEDOUT';
+        terminate(error);
+      }, options.timeoutMs);
+    }
+    const cleanup = () => {
+      finished = true;
+      clearTimeout(timeout);
+      clearTimeout(escalation);
+      options.signal?.removeEventListener('abort', abort);
+    };
     const max = Number(options.maxOutputBytes || 16 * 1024 * 1024);
     const stdout = createBoundedOutput(max, options.captureStdout ?? !options.onStdoutLine);
     const stderr = createBoundedOutput(max, options.captureStderr ?? true);
@@ -586,8 +638,10 @@ export async function defaultRunCommand(command, args, options = {}) {
     child.stderr.on('data', (chunk) => {
       stderr.append(chunk);
     });
-    child.on('error', reject);
+    child.on('error', (error) => { cleanup(); reject(error); });
     child.on('close', (code, signal) => {
+      cleanup();
+      if (failure) return reject(failure);
       const stdoutText = stdout.text();
       const stderrText = stderr.text();
       const allowed = options.allowExitCodes || [0];
@@ -597,6 +651,8 @@ export async function defaultRunCommand(command, args, options = {}) {
       error.signal = signal || '';
       reject(error);
     });
+    options.onChild?.(child);
+    if (options.signal?.aborted) abort();
   });
 }
 

@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { defaultRunCommand, ResticService } from '../src/restic/service.js';
 import { SqliteStore } from '../src/store/sqliteStore.js';
 import { resticTaskKey } from '../src/restic/taskKey.js';
 import { createApp } from '../src/web/server.js';
+import { ensureDirectory } from '../src/restic/directories.js';
 
 async function fixture(runCommand, { ignorePatterns = ['custom.tmp'] } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'restic-service-data-'));
@@ -30,6 +31,99 @@ async function fixture(runCommand, { ignorePatterns = ['custom.tmp'] } = {}) {
   await service.ensureDirectories();
   return { service, store, dataDir, sourceRoot, restoreRoot };
 }
+
+test('backup and startup do not depend on a removed restore directory', async () => {
+  const calls = [];
+  const { service, restoreRoot } = await fixture(async (_command, args) => {
+    calls.push(args);
+    return { code: 0, stdout: '[]', stderr: '' };
+  });
+  await service.setPassword('honvin', 'a-strong-test-password');
+  await rm(restoreRoot, { recursive: true });
+  await service.start();
+  await service.startBackup('honvin');
+  const finished = await service.waitForIdle();
+  service.stop();
+  assert.equal(finished.active, false);
+  assert.equal(finished.error, '');
+  assert.ok(calls.some((args) => args.includes('backup')));
+  await assert.rejects(service.restoreToNas('honvin', 'abcdef'), /恢复目录不可用/);
+  await assert.rejects(service.prepareDownload('honvin', 'abcdef', 'hello.txt'), /恢复目录不可用/);
+});
+
+test('directory preparation fails on a non-directory parent without retrying', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'restic-bad-parent-'));
+  try {
+    await writeFile(path.join(root, 'parent'), 'file');
+    await assert.rejects(ensureDirectory(path.join(root, 'parent', 'child')), { code: 'ENOTDIR' });
+    await ensureDirectory(path.join(root, 'good', 'child'));
+    await ensureDirectory(path.join(root, 'good', 'child'));
+  } finally {
+    await rm(root, { recursive: true });
+  }
+});
+
+test('repository timeout releases the job and never proceeds to backup or init', async () => {
+  const calls = [];
+  const { service } = await fixture(async (_command, args, options) => {
+    calls.push(args);
+    return defaultRunCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options);
+  });
+  service.repositoryTimeoutMs = 100;
+  await service.setPassword('honvin', 'a-strong-test-password');
+  await service.startBackup('honvin');
+  const finished = await service.waitForIdle();
+  assert.equal(finished.active, false);
+  assert.equal(finished.phase, 'failed');
+  assert.match(finished.error, /超过/);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].includes('snapshots'));
+});
+
+test('cancel before a child starts prevents subsequent commands', async () => {
+  let entered;
+  const preparing = new Promise((resolve) => { entered = resolve; });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let commands = 0;
+  const { service } = await fixture(async () => { commands++; return { code: 0, stdout: '[]', stderr: '' }; });
+  await service.setPassword('honvin', 'a-strong-test-password');
+  service.ensureDirectories = async () => { entered(); await gate; };
+  await service.startBackup('honvin');
+  await preparing;
+  service.stopJob();
+  release();
+  const status = await service.waitForIdle();
+  assert.equal(commands, 0);
+  assert.equal(status.stopped, true);
+  assert.equal(status.active, false);
+});
+
+test('command timeout escalates a SIGTERM-ignoring child and waits for exit', async () => {
+  let pid;
+  let ready = false;
+  await assert.rejects(defaultRunCommand(process.execPath, ['-e',
+    "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)"
+  ], {
+    timeoutMs: 1000,
+    killGraceMs: 50,
+    onChild: (child) => { pid = child.pid; },
+    onStdoutLine: () => { ready = true; }
+  }), { code: 'ETIMEDOUT' });
+  assert.equal(ready, true);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+});
+
+test('aborted command is rejected before spawning', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('Operation cancelled'));
+  let spawned = false;
+  await assert.rejects(defaultRunCommand(process.execPath, ['-e', ''], {
+    signal: controller.signal,
+    onChild: () => { spawned = true; }
+  }), /cancelled/);
+  assert.equal(spawned, false);
+});
 
 test('defaultRunCommand streams large line output without retaining it', async () => {
   const lineCount = 4096;
