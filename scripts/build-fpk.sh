@@ -31,6 +31,15 @@ package_tar -czf "$staging_dir/package/app.tgz" -C "$project_dir/app" docker ui
 cp "$project_dir/manifest" "$project_dir/LICENSE" "$project_dir/ICON.PNG" "$project_dir/ICON_256.PNG" "$staging_dir/package/"
 cp -R "$project_dir/cmd" "$project_dir/config" "$staging_dir/package/"
 
+if command -v md5sum >/dev/null 2>&1; then
+  checksum=$(md5sum "$staging_dir/package/app.tgz" | awk '{print $1}')
+else
+  checksum=$(md5 -q "$staging_dir/package/app.tgz")
+fi
+sed '/^checksum[[:space:]]*=/d' "$staging_dir/package/manifest" > "$staging_dir/manifest"
+printf '\nchecksum=%s\n' "$checksum" >> "$staging_dir/manifest"
+mv "$staging_dir/manifest" "$staging_dir/package/manifest"
+
 output="$project_dir/outputs/pcloud-nas-sync-$version.fpk"
 package_tar -czf "$output" -C "$staging_dir/package" app.tgz LICENSE cmd config ICON.PNG ICON_256.PNG manifest wizard
 echo "$output"
