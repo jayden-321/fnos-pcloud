@@ -1,5 +1,8 @@
 # pCloud NAS Sync
 
+See [Maintainer and project history](MAINTAINERS.md) for ownership, public
+maintenance evidence, project purpose and licensing details.
+
 fnOS pCloud NAS Sync is a Docker-based fnOS application for backing up selected NAS folders to pCloud with OAuth 2.0. Its recommended mode uses Restic repositories for encrypted, deduplicated snapshots, retention, integrity checks, indexed browsing, downloads, and isolated restores. The legacy one-way upload mode remains available for existing tasks. The project is designed for personal self-hosted NAS backup and does not include bundled pCloud credentials, user IDs, secrets, or tokens.
 
 ## Features
