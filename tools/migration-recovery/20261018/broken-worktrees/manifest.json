@@ -1,0 +1,47 @@
+{
+  "purpose": "source recovery from dangling Git worktree pointers; not an integrated release",
+  "source_map": [
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "README.md",
+      "blob": "c1be1534a5fc34d65aa60baa5e8f1c00e7bf4217",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/README.md"
+    },
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "SECURITY.md",
+      "blob": "e873ebc0ce1fbc73d461aeb5f702f68af7d1cdea",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/SECURITY.md"
+    },
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "app/docker/pcloud-sync/test/config.test.js",
+      "blob": "6001b781a22ddec8fc314057b13ec531a669be25",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/app/docker/pcloud-sync/test/config.test.js"
+    },
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "app/docker/pcloud-sync/test/restic.test.js",
+      "blob": "927163d5d7c7ba963437aabec70a76054bc439bf",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/app/docker/pcloud-sync/test/restic.test.js"
+    },
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "app/docker/pcloud-sync/src/config/config.js",
+      "blob": "62f1a661ea9e1ef489d5f0005b71f08d59914355",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/app/docker/pcloud-sync/src/config/config.js"
+    },
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "app/docker/pcloud-sync/src/restic/service.js",
+      "blob": "d8a83ec3ce4e5e855e9204b78ece2eb4179828dd",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/app/docker/pcloud-sync/src/restic/service.js"
+    },
+    {
+      "variant": "pcloud-nas-sync-restic",
+      "original_path": "docs/2026-07-19-restic-backup-design.md",
+      "blob": "c6e261862b74e194ccc6b2db1c2a8dfa9f398ab2",
+      "preserved_path": "tools/migration-recovery/20261018/broken-worktrees/pcloud-nas-sync-restic/docs/2026-07-19-restic-backup-design.md"
+    }
+  ]
+}
